@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Transaction, SheetType, ArticleDDS, CounterpartyRef, ParsedSheet, DataSource } from '@/types';
+import type { Transaction, SheetType, ArticleDDS, CounterpartyRef, ParsedSheet, DataSource, SheetProfile } from '@/types';
 // ParsedSheet now includes sourceId, sourceName, selected
 
 let globalId = 0;
@@ -103,6 +103,54 @@ function detectSheetType(sheetName: string, headers: string[]): SheetType {
 
   // Затем по заголовкам
   return detectSheetTypeByHeaders(headers);
+}
+
+
+function getColumnLetter(colIndex: number): string {
+  let n = colIndex + 1;
+  let out = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProfile {
+  const headers = (data[headerRowIndex] || []).map((h, idx) => {
+    const title = String(h || '').trim();
+    return title || `Колонка ${getColumnLetter(idx)}`;
+  });
+
+  const uniqueHeaders = headers.map((h, idx) => (headers.indexOf(h) === idx ? h : `${h} (${getColumnLetter(idx)})`));
+
+  const valuesByColumn: Record<string, string[]> = {};
+  uniqueHeaders.forEach((h) => {
+    valuesByColumn[h] = [];
+  });
+
+  for (let r = headerRowIndex + 1; r < data.length; r++) {
+    const row = data[r] || [];
+    uniqueHeaders.forEach((header, c) => {
+      const value = String(row[c] ?? '').trim();
+      if (!value) return;
+      const bucket = valuesByColumn[header];
+      if (!bucket.includes(value)) {
+        bucket.push(value);
+      }
+    });
+  }
+
+  uniqueHeaders.forEach((header) => {
+    valuesByColumn[header] = valuesByColumn[header].slice(0, 300);
+  });
+
+  return {
+    sheetName: '',
+    columns: uniqueHeaders,
+    valuesByColumn,
+  };
 }
 
 // ========== Нахождение строки заголовков ==========
@@ -432,6 +480,7 @@ function getDirection(article: string, articlesRef: ArticleDDS[]): 'in' | 'out' 
 
 export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit<DataSource, 'id' | 'type' | 'url' | 'status' | 'error'> {
   const sheets: ParsedSheet[] = [];
+  const sheetProfiles: SheetProfile[] = [];
   let articles: ArticleDDS[] = [];
   let counterparties: CounterpartyRef[] = [];
   const allTransactions: Transaction[] = [];
@@ -453,6 +502,9 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
 
     const { headerRowIndex, headers } = findHeaderRow(data);
     const type = detectSheetType(sheetName, headers);
+    const profile = buildSheetProfile(data, headerRowIndex);
+    profile.sheetName = sheetName;
+    sheetProfiles.push(profile);
 
     if (type === 'reference') {
       const ref = parseReferenceSheet(data, headerRowIndex);
@@ -494,6 +546,7 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
   return {
     name: sourceName,
     sheets,
+    sheetProfiles,
     transactions: allTransactions,
     articles,
     counterparties,
