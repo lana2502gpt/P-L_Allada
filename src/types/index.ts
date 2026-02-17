@@ -41,9 +41,16 @@ export interface DataSource {
   status: 'loading' | 'ready' | 'error';
   error?: string;
   sheets: ParsedSheet[];
+  sheetProfiles: SheetProfile[];
   transactions: Transaction[];
   articles: ArticleDDS[];
   counterparties: CounterpartyRef[];
+}
+
+export interface SheetProfile {
+  sheetName: string;
+  columns: string[];
+  valuesByColumn: Record<string, string[]>;
 }
 
 // === Результат парсинга листа ===
