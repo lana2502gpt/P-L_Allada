@@ -124,6 +124,19 @@ export function FileUpload() {
     return profile?.columns || [];
   };
 
+  const getValuesForConfig = (config: { sourceId: string; sheetName: string; columnName: string } | null) => {
+    if (!config) return [] as string[];
+    const source = readySources.find(s => s.id === config.sourceId);
+    const profile = source?.sheetProfiles.find(sp => sp.sheetName === config.sheetName);
+    if (!profile) return [] as string[];
+
+    return (profile.valuesByColumn[config.columnName] || [])
+      .map(v => String(v || '').trim())
+      .filter(Boolean)
+      .filter((value, idx, arr) => arr.indexOf(value) === idx);
+  };
+
+
   const applyReferenceFromColumn = useCallback((
     config: { sourceId: string; sheetName: string; columnName: string } | null,
     target: 'counterparties' | 'articles',
@@ -140,10 +153,7 @@ export function FileUpload() {
       return;
     }
 
-    const values = (profile.valuesByColumn[config.columnName] || [])
-      .map(v => String(v || '').trim())
-      .filter(Boolean)
-      .filter((value, idx, arr) => arr.indexOf(value) === idx);
+    const values = getValuesForConfig(config);
 
     if (values.length === 0) {
       setDictionaryNotice({ kind: 'error', text: 'В выбранном столбце нет данных для загрузки.' });
@@ -400,10 +410,11 @@ export function FileUpload() {
                   <option key={col} value={col}>{col}</option>
                 ))}
               </select>
+              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(counterpartyConfig).length}</p>
               <button
+                type="button"
                 onClick={() => applyReferenceFromColumn(counterpartyConfig, 'counterparties')}
-                disabled={!counterpartyConfig?.columnName}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
               >
                 Загрузить контрагентов
               </button>
@@ -443,10 +454,11 @@ export function FileUpload() {
                   <option key={col} value={col}>{col}</option>
                 ))}
               </select>
+              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(articleConfig).length}</p>
               <button
+                type="button"
                 onClick={() => applyReferenceFromColumn(articleConfig, 'articles')}
-                disabled={!articleConfig?.columnName}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
               >
                 Загрузить статьи
               </button>
