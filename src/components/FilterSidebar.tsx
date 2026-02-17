@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
@@ -101,6 +101,33 @@ function MultiSelect({
   );
 }
 
+
+function parseDateInput(value: string): Date | null {
+  const v = value.trim();
+  if (!v) return null;
+
+  const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+
+  const day = Number(m[1]);
+  const month = Number(m[2]) - 1;
+  const year = Number(m[3]);
+  const d = new Date(year, month, day);
+
+  if (Number.isNaN(d.getTime())) return null;
+  if (d.getFullYear() != year || d.getMonth() != month || d.getDate() != day) return null;
+
+  return d;
+}
+
+function formatDateInput(date: Date | null): string {
+  if (!date) return '';
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
 export function FilterSidebar() {
   const {
     state,
@@ -114,6 +141,18 @@ export function FilterSidebar() {
 
   const { filters } = state;
   const hasData = allTransactions.length > 0;
+
+  const [dateFromInput, setDateFromInput] = useState(formatDateInput(filters.dateFrom));
+  const [dateToInput, setDateToInput] = useState(formatDateInput(filters.dateTo));
+
+
+  useEffect(() => {
+    setDateFromInput(formatDateInput(filters.dateFrom));
+  }, [filters.dateFrom]);
+
+  useEffect(() => {
+    setDateToInput(formatDateInput(filters.dateTo));
+  }, [filters.dateTo]);
 
   const articleNames = useMemo(() =>
     allArticles.filter(a => a.name).map(a => a.name),
@@ -155,28 +194,42 @@ export function FilterSidebar() {
           <div>
             <label className="text-[10px] text-slate-500">С</label>
             <input
-              type="date"
-              value={filters.dateFrom ? filters.dateFrom.toISOString().split('T')[0] : ''}
-              onChange={(e) =>
-                dispatch({
-                  type: 'SET_FILTERS',
-                  payload: { dateFrom: e.target.value ? new Date(e.target.value) : null },
-                })
-              }
+              type="text"
+              inputMode="numeric"
+              placeholder="дд/мм/гггг"
+              value={dateFromInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setDateFromInput(value);
+                const parsed = parseDateInput(value);
+                if (parsed || !value.trim()) {
+                  dispatch({
+                    type: 'SET_FILTERS',
+                    payload: { dateFrom: parsed },
+                  });
+                }
+              }}
               className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
             />
           </div>
           <div>
             <label className="text-[10px] text-slate-500">По</label>
             <input
-              type="date"
-              value={filters.dateTo ? filters.dateTo.toISOString().split('T')[0] : ''}
-              onChange={(e) =>
-                dispatch({
-                  type: 'SET_FILTERS',
-                  payload: { dateTo: e.target.value ? new Date(e.target.value) : null },
-                })
-              }
+              type="text"
+              inputMode="numeric"
+              placeholder="дд/мм/гггг"
+              value={dateToInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setDateToInput(value);
+                const parsed = parseDateInput(value);
+                if (parsed || !value.trim()) {
+                  dispatch({
+                    type: 'SET_FILTERS',
+                    payload: { dateTo: parsed },
+                  });
+                }
+              }}
               className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
             />
           </div>

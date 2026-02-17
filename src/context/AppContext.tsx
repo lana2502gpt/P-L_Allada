@@ -85,6 +85,28 @@ function stripOrgPrefix(normalized: string): string {
   return parts.slice(idx).join(' ').trim();
 }
 
+
+
+function buildTokenSignature(normalized: string): string {
+  if (!normalized) return '';
+
+  const stopTokens = new Set([
+    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
+    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+    'и', 'в', 'по', 'на', 'для', 'от', 'с', 'к',
+  ]);
+
+  const tokens = normalized
+    .split(' ')
+    .map(t => t.trim())
+    .filter(Boolean)
+    .filter(t => !stopTokens.has(t))
+    .filter(t => t.length >= 3)
+    .sort();
+
+  return tokens.join('|');
+}
+
 // ========== State ==========
 
 interface AppState {
@@ -196,9 +218,11 @@ function getSelectedSheetNames(sources: DataSource[]): Set<string> {
 
 function buildCounterpartyDictionary(sources: DataSource[]): {
   exactMap: Map<string, string>;
+  tokenMap: Map<string, string>;
   hasReferences: boolean;
 } {
   const exactMap = new Map<string, string>();
+  const tokenMap = new Map<string, string>();
   let hasReferences = false;
 
   sources
@@ -213,6 +237,7 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
         const cleaned = cleanCounterparty(displayName);
         const normalized = normalizeCounterpartyForMatch(cleaned);
         const stripped = stripOrgPrefix(normalized);
+        const signature = buildTokenSignature(stripped || normalized);
 
         if (normalized && !exactMap.has(normalized)) {
           exactMap.set(normalized, displayName);
@@ -221,15 +246,19 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
         if (stripped && !exactMap.has(stripped)) {
           exactMap.set(stripped, displayName);
         }
+
+        if (signature && !tokenMap.has(signature)) {
+          tokenMap.set(signature, displayName);
+        }
       });
     });
 
-  return { exactMap, hasReferences };
+  return { exactMap, tokenMap, hasReferences };
 }
 
 function resolveCounterpartyName(
   rawCounterparty: string,
-  dictionary: { exactMap: Map<string, string>; hasReferences: boolean },
+  dictionary: { exactMap: Map<string, string>; tokenMap: Map<string, string>; hasReferences: boolean },
 ): string {
   const raw = String(rawCounterparty || '').trim();
 
@@ -242,6 +271,11 @@ function resolveCounterpartyName(
 
   const found = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
   if (found) return found;
+
+  const signature = buildTokenSignature(strippedTx || normalizedTx);
+  if (signature && dictionary.tokenMap.has(signature)) {
+    return dictionary.tokenMap.get(signature) || cleaned;
+  }
 
   // Если справочник не загружен — показываем очищенное исходное значение
   if (!dictionary.hasReferences) {
