@@ -14,12 +14,10 @@ function cleanCounterparty(raw: string): string {
     'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х',
     'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х',
   };
-  let normalized = '';
-  for (const ch of s) {
-    normalized += engToRus[ch] ?? ch;
-  }
 
-  const upper = normalized.toUpperCase();
+  s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
+
+  const upper = s.toUpperCase();
 
   // Стоп-фразы — обрезаем всё начиная с них
   const stopPhrases = [
@@ -37,44 +35,54 @@ function cleanCounterparty(raw: string): string {
       cutPos = idx;
     }
   }
+
   if (cutPos < upper.length) {
     s = s.substring(0, cutPos).trim();
-    normalized = normalized.substring(0, cutPos).trim();
   }
 
-  // Убираем номера документов (типа 45/21, 10/АЛ-А/22, 202212...)
-  // Паттерн: если после организационной формы идёт что-то с цифрами/слешами
-  const normUpper = normalized.toUpperCase();
+  s = s.replace(/[\s,;.-]+$/, '').trim();
+  if (!s) return '';
 
-  // Список организационных форм
+  // Для юрлиц/организаций оставляем полное имя (не урезаем до "ООО")
   const orgForms = [
     'КОЛЛЕГИЯ АДВОКАТОВ', 'АДВОКАТСКОЕ БЮРО', 'АДВОКАТСКАЯ КОНТОРА',
     'УПРАВЛЯЮЩАЯ КОМПАНИЯ', 'СТРАХОВАЯ КОМПАНИЯ',
     'ООО', 'ОАО', 'ЗАО', 'ПАО', 'АО', 'НКО', 'НАО',
-    'БАНК', 'ИП', 'ГБУЗ', 'ГБУ', 'МУП', 'ГУП', 'ФГУП', 'КФХ',
+    'БАНК', 'ИП', 'ГБУЗ', 'ГБУ', 'МУП', 'ГУП', 'ФГУП', 'КФХ', 'ФБУЗ',
   ];
 
-  for (const form of orgForms) {
-    const idx = normUpper.indexOf(form);
-    if (idx !== -1) {
-      // Берём всё до конца организационной формы
-      const endPos = idx + form.length;
-      let result = s.substring(0, endPos).trim();
-      // Убираем trailing мусор
-      result = result.replace(/[\s,;.\-]+$/, '');
-      if (result.length >= 2) {
-        return result;
-      }
-    }
+  const upperCleaned = s.toUpperCase();
+  if (orgForms.some(form => upperCleaned.includes(form))) {
+    return s;
   }
 
-  // Если организационная форма не найдена — считаем что это ФИО
-  // Берём первые 3 слова
-  const words = s.split(/\s+/).filter(w => w.length > 0);
+  // Физлица: оставляем до 3 слов
+  const words = s.split(/\s+/).filter(Boolean);
   if (words.length <= 3) return words.join(' ');
-
-  // Проверяем, не начинается ли 4-е слово с цифры
   return words.slice(0, 3).join(' ');
+}
+
+function normalizeCounterpartyForMatch(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/["«»']/g, '')
+    .replace(/[.,;:()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripOrgPrefix(normalized: string): string {
+  const prefixes = [
+    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
+    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+  ];
+
+  const parts = normalized.split(' ').filter(Boolean);
+  let idx = 0;
+  while (idx < parts.length && prefixes.includes(parts[idx])) {
+    idx += 1;
+  }
+  return parts.slice(idx).join(' ').trim();
 }
 
 // ========== State ==========
@@ -186,11 +194,78 @@ function getSelectedSheetNames(sources: DataSource[]): Set<string> {
   return set;
 }
 
+function buildCounterpartyDictionary(sources: DataSource[]): {
+  exactMap: Map<string, string>;
+  hasReferences: boolean;
+} {
+  const exactMap = new Map<string, string>();
+  let hasReferences = false;
+
+  sources
+    .filter(s => s.status === 'ready')
+    .forEach(s => {
+      s.counterparties.forEach((cp) => {
+        const displayName = cp.name?.trim();
+        if (!displayName) return;
+
+        hasReferences = true;
+
+        const cleaned = cleanCounterparty(displayName);
+        const normalized = normalizeCounterpartyForMatch(cleaned);
+        const stripped = stripOrgPrefix(normalized);
+
+        if (normalized && !exactMap.has(normalized)) {
+          exactMap.set(normalized, displayName);
+        }
+
+        if (stripped && !exactMap.has(stripped)) {
+          exactMap.set(stripped, displayName);
+        }
+      });
+    });
+
+  return { exactMap, hasReferences };
+}
+
+function resolveCounterpartyName(
+  rawCounterparty: string,
+  dictionary: { exactMap: Map<string, string>; hasReferences: boolean },
+): string {
+  const raw = String(rawCounterparty || '').trim();
+
+  // Если в журнале/выписке контрагент пустой — оставляем пустым
+  if (!raw) return '';
+
+  const cleaned = cleanCounterparty(raw);
+  const normalizedTx = normalizeCounterpartyForMatch(cleaned);
+  const strippedTx = stripOrgPrefix(normalizedTx);
+
+  const found = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
+  if (found) return found;
+
+  // Если справочник не загружен — показываем очищенное исходное значение
+  if (!dictionary.hasReferences) {
+    return cleaned;
+  }
+
+  // Если справочник есть, но совпадение не найдено
+  return 'нет в справочнике';
+}
+
 function getAllTransactions(sources: DataSource[]): Transaction[] {
   const selectedSheets = getSelectedSheetNames(sources);
+  const dictionary = buildCounterpartyDictionary(sources);
+
   return sources
     .filter(s => s.status === 'ready')
-    .flatMap(s => s.transactions.filter(t => selectedSheets.has(t.sheet)));
+    .flatMap(s =>
+      s.transactions
+        .filter(t => selectedSheets.has(t.sheet))
+        .map(t => ({
+          ...t,
+          counterparty: resolveCounterpartyName(t.counterparty, dictionary),
+        })),
+    );
 }
 
 function getAllArticles(sources: DataSource[]): ArticleDDS[] {
@@ -230,12 +305,10 @@ function getUniqueSheets(transactions: Transaction[]): string[] {
 }
 
 function getUniqueCounterpartiesFromTx(transactions: Transaction[]): string[] {
-  // НОРМАЛИЗАЦИЯ: группируем контрагентов через cleanCounterparty
   const set = new Set<string>();
   transactions.forEach(t => {
     if (t.counterparty) {
-      const cleaned = cleanCounterparty(t.counterparty);
-      if (cleaned) set.add(cleaned);
+      set.add(t.counterparty);
     }
   });
   return Array.from(set).sort();
@@ -251,10 +324,8 @@ function applyFilters(transactions: Transaction[], filters: Filters): Transactio
     }
     if (filters.articles.length > 0 && !filters.articles.includes(t.article)) return false;
     if (filters.branches.length > 0 && !filters.branches.includes(t.branch)) return false;
-    // НОРМАЛИЗАЦИЯ при фильтрации: сравниваем нормализованные значения
     if (filters.counterparties.length > 0) {
-      const cleaned = cleanCounterparty(t.counterparty);
-      if (!filters.counterparties.includes(cleaned)) return false;
+      if (!filters.counterparties.includes(t.counterparty)) return false;
     }
     if (filters.sheets.length > 0 && !filters.sheets.includes(t.sheet)) return false;
     if (filters.direction !== 'all' && t.direction !== filters.direction) return false;
