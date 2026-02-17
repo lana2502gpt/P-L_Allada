@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Upload, Link, X, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { parseExcelFile, parseGoogleSheet } from '@/utils/parser';
@@ -10,6 +10,9 @@ export function FileUpload() {
   const { state, dispatch } = useAppContext();
   const [googleUrl, setGoogleUrl] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [counterpartyConfig, setCounterpartyConfig] = useState<{ sourceId: string; sheetName: string; columnName: string } | null>(null);
+  const [articleConfig, setArticleConfig] = useState<{ sourceId: string; sheetName: string; columnName: string } | null>(null);
+  const [dictionaryNotice, setDictionaryNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addSource = useCallback(async (
@@ -30,6 +33,7 @@ export function FileUpload() {
       transactions: [],
       articles: [],
       counterparties: [],
+      sheetProfiles: [],
     };
 
     dispatch({ type: 'ADD_SOURCE', payload: source });
@@ -48,6 +52,7 @@ export function FileUpload() {
             transactions: result.transactions,
             articles: result.articles,
             counterparties: result.counterparties,
+            sheetProfiles: result.sheetProfiles,
             name: result.name,
           },
         },
@@ -104,6 +109,154 @@ export function FileUpload() {
 
   const readySources = state.sources.filter(s => s.status === 'ready');
   const hasJournals = readySources.some(s => s.sheets.some(sh => sh.type === 'cash_journal' || sh.type === 'bank_journal'));
+
+
+  const sourceOptions = readySources.map(source => ({
+    sourceId: source.id,
+    sourceName: source.name,
+    profiles: source.sheetProfiles,
+  }));
+
+
+  const getActiveProfilesForSource = (sourceId?: string) => {
+    if (!sourceId) return [];
+    const source = readySources.find(s => s.id === sourceId);
+    if (!source) return [];
+
+    const activeSheetNames = new Set(
+      source.sheets
+        .filter(sh => sh.type !== 'unknown' && sh.rowCount > 0)
+        .map(sh => sh.name),
+    );
+
+    return source.sheetProfiles.filter(profile => activeSheetNames.has(profile.sheetName));
+  };
+
+
+
+  useEffect(() => {
+    if (readySources.length !== 1) return;
+
+    const onlySource = readySources[0];
+    const defaultProfile = onlySource.sheetProfiles[0];
+    const defaultColumn = defaultProfile?.columns[0] || '';
+
+    if (!counterpartyConfig) {
+      setCounterpartyConfig({
+        sourceId: onlySource.id,
+        sheetName: defaultProfile?.sheetName || '',
+        columnName: defaultColumn,
+      });
+    }
+
+    if (!articleConfig) {
+      setArticleConfig({
+        sourceId: onlySource.id,
+        sheetName: defaultProfile?.sheetName || '',
+        columnName: defaultColumn,
+      });
+    }
+  }, [readySources, counterpartyConfig, articleConfig]);
+
+  const buildFallbackConfig = useCallback((
+    target: 'counterparties' | 'articles',
+  ): { sourceId: string; sheetName: string; columnName: string } | null => {
+    const source = readySources[0];
+    if (!source) return null;
+
+    const profile = source.sheetProfiles[0];
+    if (!profile) return null;
+
+    const keyword = target === 'counterparties' ? 'контрагент' : 'статья';
+
+    const columnByKeyword = profile.columns.find((col) => col.toLowerCase().includes(keyword));
+
+    return {
+      sourceId: source.id,
+      sheetName: profile.sheetName,
+      columnName: columnByKeyword || profile.columns[0] || '',
+    };
+  }, [readySources]);
+  const getColumnsForConfig = (sourceId?: string, sheetName?: string) => {
+    if (!sourceId || !sheetName) return [];
+    const source = readySources.find(s => s.id === sourceId);
+    const profile = source?.sheetProfiles.find(sp => sp.sheetName === sheetName);
+    return profile?.columns || [];
+  };
+
+  const getValuesForConfig = (config: { sourceId: string; sheetName: string; columnName: string } | null) => {
+    if (!config) return [] as string[];
+    const source = readySources.find(s => s.id === config.sourceId);
+    const profile = source?.sheetProfiles.find(sp => sp.sheetName === config.sheetName);
+    if (!profile) return [] as string[];
+
+    return (profile.valuesByColumn[config.columnName] || [])
+      .map(v => String(v || '').trim())
+      .filter(Boolean)
+      .filter((value, idx, arr) => arr.indexOf(value) === idx);
+  };
+
+
+  const applyReferenceFromColumn = useCallback((
+    config: { sourceId: string; sheetName: string; columnName: string } | null,
+    target: 'counterparties' | 'articles',
+  ) => {
+    const effectiveConfig = config && config.sourceId && config.sheetName && config.columnName
+      ? config
+      : buildFallbackConfig(target);
+
+    if (!effectiveConfig || !effectiveConfig.sourceId || !effectiveConfig.sheetName || !effectiveConfig.columnName) {
+      setDictionaryNotice({ kind: 'error', text: 'Выберите источник, лист и столбец.' });
+      return;
+    }
+
+    const source = readySources.find(s => s.id === effectiveConfig.sourceId);
+    const profile = source?.sheetProfiles.find(sp => sp.sheetName === effectiveConfig.sheetName);
+    if (!source || !profile) {
+      setDictionaryNotice({ kind: 'error', text: 'Не удалось найти выбранный источник или лист.' });
+      return;
+    }
+
+    const values = getValuesForConfig(effectiveConfig);
+
+    if (values.length === 0) {
+      setDictionaryNotice({ kind: 'error', text: 'В выбранном столбце нет данных для загрузки.' });
+      return;
+    }
+
+    if (target === 'counterparties') {
+      dispatch({
+        type: 'UPDATE_SOURCE',
+        payload: {
+          id: source.id,
+          updates: { counterparties: values.map(v => ({ name: v })) },
+        },
+      });
+      setDictionaryNotice({ kind: 'success', text: `Загружено контрагентов: ${values.length}` });
+      return;
+    }
+
+    dispatch({
+      type: 'UPDATE_SOURCE',
+      payload: {
+        id: source.id,
+        updates: {
+          articles: values.map(v => ({
+            name: v,
+            group: '',
+            activityType: '',
+            comment: '',
+          })),
+        },
+      },
+    });
+    setDictionaryNotice({ kind: 'success', text: `Загружено статей: ${values.length}` });
+  }, [dispatch, readySources, buildFallbackConfig]);
+
+
+  useEffect(() => {
+    setDictionaryNotice(null);
+  }, [counterpartyConfig, articleConfig]);
 
   return (
     <div className="space-y-6">
@@ -266,6 +419,119 @@ export function FileUpload() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {readySources.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-amber-800 uppercase tracking-wide">
+              Настройка справочников
+            </h3>
+            <p className="mt-1 text-xs text-amber-700">
+              Выберите лист и столбец для загрузки справочника контрагентов и статей затрат.
+            </p>
+          </div>
+
+          {dictionaryNotice && (
+            <div className={`rounded-lg border px-3 py-2 text-xs ${
+              dictionaryNotice.kind === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}>
+              {dictionaryNotice.text}
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-amber-200 bg-white p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">Контрагенты</p>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={counterpartyConfig?.sourceId || ''}
+                onChange={(e) => setCounterpartyConfig({ sourceId: e.target.value, sheetName: '', columnName: '' })}
+              >
+                <option value="">Источник</option>
+                {sourceOptions.map(src => (
+                  <option key={src.sourceId} value={src.sourceId}>{src.sourceName}</option>
+                ))}
+              </select>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={counterpartyConfig?.sheetName || ''}
+                onChange={(e) => setCounterpartyConfig(prev => prev ? { ...prev, sheetName: e.target.value, columnName: '' } : null)}
+                disabled={!counterpartyConfig?.sourceId}
+              >
+                <option value="">Лист</option>
+                {getActiveProfilesForSource(counterpartyConfig?.sourceId).map(profile => (
+                  <option key={profile.sheetName} value={profile.sheetName}>{profile.sheetName}</option>
+                ))}
+              </select>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={counterpartyConfig?.columnName || ''}
+                onChange={(e) => setCounterpartyConfig(prev => prev ? { ...prev, columnName: e.target.value } : null)}
+                disabled={!counterpartyConfig?.sheetName}
+              >
+                <option value="">Столбец</option>
+                {getColumnsForConfig(counterpartyConfig?.sourceId, counterpartyConfig?.sheetName).map(col => (
+                  <option key={col} value={col}>{col}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(counterpartyConfig).length}</p>
+              <button
+                type="button"
+                onClick={() => applyReferenceFromColumn(counterpartyConfig, 'counterparties')}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                Загрузить контрагентов
+              </button>
+            </div>
+
+            <div className="rounded-lg border border-amber-200 bg-white p-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">Статьи затрат</p>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={articleConfig?.sourceId || ''}
+                onChange={(e) => setArticleConfig({ sourceId: e.target.value, sheetName: '', columnName: '' })}
+              >
+                <option value="">Источник</option>
+                {sourceOptions.map(src => (
+                  <option key={src.sourceId} value={src.sourceId}>{src.sourceName}</option>
+                ))}
+              </select>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={articleConfig?.sheetName || ''}
+                onChange={(e) => setArticleConfig(prev => prev ? { ...prev, sheetName: e.target.value, columnName: '' } : null)}
+                disabled={!articleConfig?.sourceId}
+              >
+                <option value="">Лист</option>
+                {getActiveProfilesForSource(articleConfig?.sourceId).map(profile => (
+                  <option key={profile.sheetName} value={profile.sheetName}>{profile.sheetName}</option>
+                ))}
+              </select>
+              <select
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                value={articleConfig?.columnName || ''}
+                onChange={(e) => setArticleConfig(prev => prev ? { ...prev, columnName: e.target.value } : null)}
+                disabled={!articleConfig?.sheetName}
+              >
+                <option value="">Столбец</option>
+                {getColumnsForConfig(articleConfig?.sourceId, articleConfig?.sheetName).map(col => (
+                  <option key={col} value={col}>{col}</option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(articleConfig).length}</p>
+              <button
+                type="button"
+                onClick={() => applyReferenceFromColumn(articleConfig, 'articles')}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                Загрузить статьи
+              </button>
+            </div>
           </div>
         </div>
       )}
