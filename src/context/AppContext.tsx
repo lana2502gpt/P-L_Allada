@@ -78,12 +78,26 @@ function cleanCounterparty(raw: string): string {
 }
 
 function normalizeCounterpartyForMatch(raw: string): string {
-  return cleanCounterparty(raw)
+  return String(raw || '')
     .toLowerCase()
     .replace(/["«»']/g, '')
     .replace(/[.,;:()]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function stripOrgPrefix(normalized: string): string {
+  const prefixes = [
+    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
+    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+  ];
+
+  const parts = normalized.split(' ').filter(Boolean);
+  let idx = 0;
+  while (idx < parts.length && prefixes.includes(parts[idx])) {
+    idx += 1;
+  }
+  return parts.slice(idx).join(' ').trim();
 }
 
 // ========== State ==========
@@ -207,10 +221,15 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
       s.counterparties.forEach((cp) => {
         const displayName = cp.name?.trim();
         if (!displayName) return;
+
         const normalized = normalizeCounterpartyForMatch(displayName);
-        if (!normalized) return;
-        if (!exactMap.has(normalized)) {
+        const stripped = stripOrgPrefix(normalized);
+
+        if (normalized && !exactMap.has(normalized)) {
           exactMap.set(normalized, displayName);
+        }
+        if (stripped && !exactMap.has(stripped)) {
+          exactMap.set(stripped, displayName);
         }
       });
     });
@@ -226,19 +245,23 @@ function resolveCounterpartyName(
   rawCounterparty: string,
   dictionary: { exactMap: Map<string, string>; normalizedRefs: Array<{ normalized: string; displayName: string }> },
 ): string {
-  const normalizedTx = normalizeCounterpartyForMatch(rawCounterparty);
+  const raw = String(rawCounterparty || '').trim();
+  const normalizedTx = normalizeCounterpartyForMatch(raw);
+  const strippedTx = stripOrgPrefix(normalizedTx);
   if (!normalizedTx) return '';
 
-  const exact = dictionary.exactMap.get(normalizedTx);
+  const exact = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
   if (exact) return exact;
 
   const contains = dictionary.normalizedRefs.find((ref) =>
-    normalizedTx.includes(ref.normalized) || ref.normalized.includes(normalizedTx),
+    normalizedTx.includes(ref.normalized)
+    || ref.normalized.includes(normalizedTx)
+    || (strippedTx && (strippedTx.includes(ref.normalized) || ref.normalized.includes(strippedTx))),
   );
 
   if (contains) return contains.displayName;
 
-  return cleanCounterparty(rawCounterparty);
+  return raw;
 }
 
 function getAllTransactions(sources: DataSource[]): Transaction[] {
