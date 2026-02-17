@@ -77,6 +77,29 @@ function cleanCounterparty(raw: string): string {
   return words.slice(0, 3).join(' ');
 }
 
+function normalizeCounterpartyForMatch(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/["«»']/g, '')
+    .replace(/[.,;:()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function stripOrgPrefix(normalized: string): string {
+  const prefixes = [
+    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
+    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+  ];
+
+  const parts = normalized.split(' ').filter(Boolean);
+  let idx = 0;
+  while (idx < parts.length && prefixes.includes(parts[idx])) {
+    idx += 1;
+  }
+  return parts.slice(idx).join(' ').trim();
+}
+
 // ========== State ==========
 
 interface AppState {
@@ -186,11 +209,75 @@ function getSelectedSheetNames(sources: DataSource[]): Set<string> {
   return set;
 }
 
+function buildCounterpartyDictionary(sources: DataSource[]): {
+  exactMap: Map<string, string>;
+  normalizedRefs: Array<{ normalized: string; displayName: string }>;
+} {
+  const exactMap = new Map<string, string>();
+
+  sources
+    .filter(s => s.status === 'ready')
+    .forEach(s => {
+      s.counterparties.forEach((cp) => {
+        const displayName = cp.name?.trim();
+        if (!displayName) return;
+
+        const normalized = normalizeCounterpartyForMatch(displayName);
+        const stripped = stripOrgPrefix(normalized);
+
+        if (normalized && !exactMap.has(normalized)) {
+          exactMap.set(normalized, displayName);
+        }
+        if (stripped && !exactMap.has(stripped)) {
+          exactMap.set(stripped, displayName);
+        }
+      });
+    });
+
+  const normalizedRefs = Array.from(exactMap.entries())
+    .map(([normalized, displayName]) => ({ normalized, displayName }))
+    .sort((a, b) => b.normalized.length - a.normalized.length);
+
+  return { exactMap, normalizedRefs };
+}
+
+function resolveCounterpartyName(
+  rawCounterparty: string,
+  dictionary: { exactMap: Map<string, string>; normalizedRefs: Array<{ normalized: string; displayName: string }> },
+): string {
+  const raw = String(rawCounterparty || '').trim();
+  const normalizedTx = normalizeCounterpartyForMatch(raw);
+  const strippedTx = stripOrgPrefix(normalizedTx);
+  if (!normalizedTx) return '';
+
+  const exact = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
+  if (exact) return exact;
+
+  const contains = dictionary.normalizedRefs.find((ref) =>
+    normalizedTx.includes(ref.normalized)
+    || ref.normalized.includes(normalizedTx)
+    || (strippedTx && (strippedTx.includes(ref.normalized) || ref.normalized.includes(strippedTx))),
+  );
+
+  if (contains) return contains.displayName;
+
+  return raw;
+}
+
 function getAllTransactions(sources: DataSource[]): Transaction[] {
   const selectedSheets = getSelectedSheetNames(sources);
+  const dictionary = buildCounterpartyDictionary(sources);
+
   return sources
     .filter(s => s.status === 'ready')
-    .flatMap(s => s.transactions.filter(t => selectedSheets.has(t.sheet)));
+    .flatMap(s =>
+      s.transactions
+        .filter(t => selectedSheets.has(t.sheet))
+        .map(t => ({
+          ...t,
+          counterparty: resolveCounterpartyName(t.counterparty, dictionary),
+        })),
+    );
 }
 
 function getAllArticles(sources: DataSource[]): ArticleDDS[] {
@@ -230,12 +317,10 @@ function getUniqueSheets(transactions: Transaction[]): string[] {
 }
 
 function getUniqueCounterpartiesFromTx(transactions: Transaction[]): string[] {
-  // НОРМАЛИЗАЦИЯ: группируем контрагентов через cleanCounterparty
   const set = new Set<string>();
   transactions.forEach(t => {
     if (t.counterparty) {
-      const cleaned = cleanCounterparty(t.counterparty);
-      if (cleaned) set.add(cleaned);
+      set.add(t.counterparty);
     }
   });
   return Array.from(set).sort();
@@ -251,10 +336,8 @@ function applyFilters(transactions: Transaction[], filters: Filters): Transactio
     }
     if (filters.articles.length > 0 && !filters.articles.includes(t.article)) return false;
     if (filters.branches.length > 0 && !filters.branches.includes(t.branch)) return false;
-    // НОРМАЛИЗАЦИЯ при фильтрации: сравниваем нормализованные значения
     if (filters.counterparties.length > 0) {
-      const cleaned = cleanCounterparty(t.counterparty);
-      if (!filters.counterparties.includes(cleaned)) return false;
+      if (!filters.counterparties.includes(t.counterparty)) return false;
     }
     if (filters.sheets.length > 0 && !filters.sheets.includes(t.sheet)) return false;
     if (filters.direction !== 'all' && t.direction !== filters.direction) return false;
