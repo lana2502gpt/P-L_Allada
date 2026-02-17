@@ -12,6 +12,7 @@ export function FileUpload() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [counterpartyConfig, setCounterpartyConfig] = useState<{ sourceId: string; sheetName: string; columnName: string } | null>(null);
   const [articleConfig, setArticleConfig] = useState<{ sourceId: string; sheetName: string; columnName: string } | null>(null);
+  const [dictionaryNotice, setDictionaryNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addSource = useCallback(async (
@@ -127,12 +128,27 @@ export function FileUpload() {
     config: { sourceId: string; sheetName: string; columnName: string } | null,
     target: 'counterparties' | 'articles',
   ) => {
-    if (!config) return;
+    if (!config) {
+      setDictionaryNotice({ kind: 'error', text: 'Выберите источник, лист и столбец.' });
+      return;
+    }
+
     const source = readySources.find(s => s.id === config.sourceId);
     const profile = source?.sheetProfiles.find(sp => sp.sheetName === config.sheetName);
-    if (!source || !profile) return;
+    if (!source || !profile) {
+      setDictionaryNotice({ kind: 'error', text: 'Не удалось найти выбранный источник или лист.' });
+      return;
+    }
 
-    const values = profile.valuesByColumn[config.columnName] || [];
+    const values = (profile.valuesByColumn[config.columnName] || [])
+      .map(v => String(v || '').trim())
+      .filter(Boolean)
+      .filter((value, idx, arr) => arr.indexOf(value) === idx);
+
+    if (values.length === 0) {
+      setDictionaryNotice({ kind: 'error', text: 'В выбранном столбце нет данных для загрузки.' });
+      return;
+    }
 
     if (target === 'counterparties') {
       dispatch({
@@ -142,6 +158,7 @@ export function FileUpload() {
           updates: { counterparties: values.map(v => ({ name: v })) },
         },
       });
+      setDictionaryNotice({ kind: 'success', text: `Загружено контрагентов: ${values.length}` });
       return;
     }
 
@@ -159,6 +176,7 @@ export function FileUpload() {
         },
       },
     });
+    setDictionaryNotice({ kind: 'success', text: `Загружено статей: ${values.length}` });
   }, [dispatch, readySources]);
 
   return (
@@ -336,6 +354,16 @@ export function FileUpload() {
               Выберите лист и столбец для загрузки справочника контрагентов и статей затрат.
             </p>
           </div>
+
+          {dictionaryNotice && (
+            <div className={`rounded-lg border px-3 py-2 text-xs ${
+              dictionaryNotice.kind === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}>
+              {dictionaryNotice.text}
+            </div>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-amber-200 bg-white p-3 space-y-2">
