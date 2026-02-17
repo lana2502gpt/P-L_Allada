@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X, CalendarDays } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
 function MultiSelect({
@@ -128,6 +128,27 @@ function formatDateInput(date: Date | null): string {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+
+function formatDateForNative(date: Date | null): string {
+  if (!date) return '';
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseNativeDate(value: string): Date | null {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(y, mo, d);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.getFullYear() !== y || date.getMonth() !== mo || date.getDate() !== d) return null;
+  return date;
+}
+
 export function FilterSidebar() {
   const {
     state,
@@ -144,6 +165,8 @@ export function FilterSidebar() {
 
   const [dateFromInput, setDateFromInput] = useState(formatDateInput(filters.dateFrom));
   const [dateToInput, setDateToInput] = useState(formatDateInput(filters.dateTo));
+  const dateFromNativeRef = useRef<HTMLInputElement | null>(null);
+  const dateToNativeRef = useRef<HTMLInputElement | null>(null);
 
 
   useEffect(() => {
@@ -193,45 +216,89 @@ export function FilterSidebar() {
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="text-[10px] text-slate-500">С</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="дд/мм/гггг"
-              value={dateFromInput}
-              onChange={(e) => {
-                const value = e.target.value;
-                setDateFromInput(value);
-                const parsed = parseDateInput(value);
-                if (parsed || !value.trim()) {
-                  dispatch({
-                    type: 'SET_FILTERS',
-                    payload: { dateFrom: parsed },
-                  });
-                }
-              }}
-              className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
-            />
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="дд/мм/гггг"
+                value={dateFromInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDateFromInput(value);
+                  const parsed = parseDateInput(value);
+                  if (parsed || !value.trim()) {
+                    dispatch({
+                      type: 'SET_FILTERS',
+                      payload: { dateFrom: parsed },
+                    });
+                  }
+                }}
+                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => dateFromNativeRef.current?.showPicker?.()}
+                className="rounded-md border border-slate-200 px-2 text-slate-500 hover:bg-slate-100"
+                title="Открыть календарь"
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+              </button>
+              <input
+                ref={dateFromNativeRef}
+                type="date"
+                value={formatDateForNative(filters.dateFrom)}
+                onChange={(e) => {
+                  const parsed = parseNativeDate(e.target.value);
+                  dispatch({ type: 'SET_FILTERS', payload: { dateFrom: parsed } });
+                }}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+            </div>
           </div>
           <div>
             <label className="text-[10px] text-slate-500">По</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="дд/мм/гггг"
-              value={dateToInput}
-              onChange={(e) => {
-                const value = e.target.value;
-                setDateToInput(value);
-                const parsed = parseDateInput(value);
-                if (parsed || !value.trim()) {
-                  dispatch({
-                    type: 'SET_FILTERS',
-                    payload: { dateTo: parsed },
-                  });
-                }
-              }}
-              className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
-            />
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="дд/мм/гггг"
+                value={dateToInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDateToInput(value);
+                  const parsed = parseDateInput(value);
+                  if (parsed || !value.trim()) {
+                    dispatch({
+                      type: 'SET_FILTERS',
+                      payload: { dateTo: parsed },
+                    });
+                  }
+                }}
+                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => dateToNativeRef.current?.showPicker?.()}
+                className="rounded-md border border-slate-200 px-2 text-slate-500 hover:bg-slate-100"
+                title="Открыть календарь"
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+              </button>
+              <input
+                ref={dateToNativeRef}
+                type="date"
+                value={formatDateForNative(filters.dateTo)}
+                onChange={(e) => {
+                  const parsed = parseNativeDate(e.target.value);
+                  dispatch({ type: 'SET_FILTERS', payload: { dateTo: parsed } });
+                }}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+            </div>
           </div>
         </div>
 

@@ -118,6 +118,21 @@ export function FileUpload() {
   }));
 
 
+  const getActiveProfilesForSource = (sourceId?: string) => {
+    if (!sourceId) return [];
+    const source = readySources.find(s => s.id === sourceId);
+    if (!source) return [];
+
+    const activeSheetNames = new Set(
+      source.sheets
+        .filter(sh => sh.type !== 'unknown' && sh.rowCount > 0)
+        .map(sh => sh.name),
+    );
+
+    return source.sheetProfiles.filter(profile => activeSheetNames.has(profile.sheetName));
+  };
+
+
 
   useEffect(() => {
     if (readySources.length !== 1) return;
@@ -449,7 +464,7 @@ export function FileUpload() {
                 disabled={!counterpartyConfig?.sourceId}
               >
                 <option value="">Лист</option>
-                {(sourceOptions.find(s => s.sourceId === counterpartyConfig?.sourceId)?.profiles || []).map(profile => (
+                {getActiveProfilesForSource(counterpartyConfig?.sourceId).map(profile => (
                   <option key={profile.sheetName} value={profile.sheetName}>{profile.sheetName}</option>
                 ))}
               </select>
@@ -493,7 +508,7 @@ export function FileUpload() {
                 disabled={!articleConfig?.sourceId}
               >
                 <option value="">Лист</option>
-                {(sourceOptions.find(s => s.sourceId === articleConfig?.sourceId)?.profiles || []).map(profile => (
+                {getActiveProfilesForSource(articleConfig?.sourceId).map(profile => (
                   <option key={profile.sheetName} value={profile.sheetName}>{profile.sheetName}</option>
                 ))}
               </select>

@@ -24,7 +24,7 @@ function cleanCounterparty(raw: string): string {
     'БЕЗ ДОГОВОРА', 'ОСНОВНОЙ ДОГОВОР', 'СОГЛАШЕНИЕ', 'СПИСАНИЕ',
     'ПОСТУПЛЕНИЕ', 'ОПЛАТА', 'ПЕРЕВОД', 'ВОЗВРАТ',
     'ДОГОВОР №', 'ДОГОВОР N', 'СЧЕТ №', 'СЧЁТ №',
-    'АКТ ', 'УПД ', 'НАКЛАДНАЯ',
+    'АКТ ', 'УПД ', 'НАКЛАДНАЯ', 'ПОСТУПЛЕНИЕ (АКТ',
     ' ОТ ',
   ];
 
@@ -102,6 +102,8 @@ function buildTokenSignature(normalized: string): string {
     .filter(Boolean)
     .filter(t => !stopTokens.has(t))
     .filter(t => t.length >= 3)
+    .filter(t => !/\d/.test(t))
+    .filter(t => /^[a-zа-яё-]+$/i.test(t))
     .sort();
 
   return tokens.join('|');
