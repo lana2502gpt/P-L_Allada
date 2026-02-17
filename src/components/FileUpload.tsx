@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Upload, Link, X, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { parseExcelFile, parseGoogleSheet } from '@/utils/parser';
@@ -117,6 +117,51 @@ export function FileUpload() {
     profiles: source.sheetProfiles,
   }));
 
+
+
+  useEffect(() => {
+    if (readySources.length !== 1) return;
+
+    const onlySource = readySources[0];
+    const defaultProfile = onlySource.sheetProfiles[0];
+    const defaultColumn = defaultProfile?.columns[0] || '';
+
+    if (!counterpartyConfig) {
+      setCounterpartyConfig({
+        sourceId: onlySource.id,
+        sheetName: defaultProfile?.sheetName || '',
+        columnName: defaultColumn,
+      });
+    }
+
+    if (!articleConfig) {
+      setArticleConfig({
+        sourceId: onlySource.id,
+        sheetName: defaultProfile?.sheetName || '',
+        columnName: defaultColumn,
+      });
+    }
+  }, [readySources, counterpartyConfig, articleConfig]);
+
+  const buildFallbackConfig = useCallback((
+    target: 'counterparties' | 'articles',
+  ): { sourceId: string; sheetName: string; columnName: string } | null => {
+    const source = readySources[0];
+    if (!source) return null;
+
+    const profile = source.sheetProfiles[0];
+    if (!profile) return null;
+
+    const keyword = target === 'counterparties' ? 'контрагент' : 'статья';
+
+    const columnByKeyword = profile.columns.find((col) => col.toLowerCase().includes(keyword));
+
+    return {
+      sourceId: source.id,
+      sheetName: profile.sheetName,
+      columnName: columnByKeyword || profile.columns[0] || '',
+    };
+  }, [readySources]);
   const getColumnsForConfig = (sourceId?: string, sheetName?: string) => {
     if (!sourceId || !sheetName) return [];
     const source = readySources.find(s => s.id === sourceId);
@@ -141,19 +186,23 @@ export function FileUpload() {
     config: { sourceId: string; sheetName: string; columnName: string } | null,
     target: 'counterparties' | 'articles',
   ) => {
-    if (!config) {
+    const effectiveConfig = config && config.sourceId && config.sheetName && config.columnName
+      ? config
+      : buildFallbackConfig(target);
+
+    if (!effectiveConfig || !effectiveConfig.sourceId || !effectiveConfig.sheetName || !effectiveConfig.columnName) {
       setDictionaryNotice({ kind: 'error', text: 'Выберите источник, лист и столбец.' });
       return;
     }
 
-    const source = readySources.find(s => s.id === config.sourceId);
-    const profile = source?.sheetProfiles.find(sp => sp.sheetName === config.sheetName);
+    const source = readySources.find(s => s.id === effectiveConfig.sourceId);
+    const profile = source?.sheetProfiles.find(sp => sp.sheetName === effectiveConfig.sheetName);
     if (!source || !profile) {
       setDictionaryNotice({ kind: 'error', text: 'Не удалось найти выбранный источник или лист.' });
       return;
     }
 
-    const values = getValuesForConfig(config);
+    const values = getValuesForConfig(effectiveConfig);
 
     if (values.length === 0) {
       setDictionaryNotice({ kind: 'error', text: 'В выбранном столбце нет данных для загрузки.' });
@@ -187,7 +236,12 @@ export function FileUpload() {
       },
     });
     setDictionaryNotice({ kind: 'success', text: `Загружено статей: ${values.length}` });
-  }, [dispatch, readySources]);
+  }, [dispatch, readySources, buildFallbackConfig]);
+
+
+  useEffect(() => {
+    setDictionaryNotice(null);
+  }, [counterpartyConfig, articleConfig]);
 
   return (
     <div className="space-y-6">
