@@ -14,12 +14,10 @@ function cleanCounterparty(raw: string): string {
     'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х',
     'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х',
   };
-  let normalized = '';
-  for (const ch of s) {
-    normalized += engToRus[ch] ?? ch;
-  }
 
-  const upper = normalized.toUpperCase();
+  s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
+
+  const upper = s.toUpperCase();
 
   // Стоп-фразы — обрезаем всё начиная с них
   const stopPhrases = [
@@ -37,43 +35,30 @@ function cleanCounterparty(raw: string): string {
       cutPos = idx;
     }
   }
+
   if (cutPos < upper.length) {
     s = s.substring(0, cutPos).trim();
-    normalized = normalized.substring(0, cutPos).trim();
   }
 
-  // Убираем номера документов (типа 45/21, 10/АЛ-А/22, 202212...)
-  // Паттерн: если после организационной формы идёт что-то с цифрами/слешами
-  const normUpper = normalized.toUpperCase();
+  s = s.replace(/[\s,;.-]+$/, '').trim();
+  if (!s) return '';
 
-  // Список организационных форм
+  // Для юрлиц/организаций оставляем полное имя (не урезаем до "ООО")
   const orgForms = [
     'КОЛЛЕГИЯ АДВОКАТОВ', 'АДВОКАТСКОЕ БЮРО', 'АДВОКАТСКАЯ КОНТОРА',
     'УПРАВЛЯЮЩАЯ КОМПАНИЯ', 'СТРАХОВАЯ КОМПАНИЯ',
     'ООО', 'ОАО', 'ЗАО', 'ПАО', 'АО', 'НКО', 'НАО',
-    'БАНК', 'ИП', 'ГБУЗ', 'ГБУ', 'МУП', 'ГУП', 'ФГУП', 'КФХ',
+    'БАНК', 'ИП', 'ГБУЗ', 'ГБУ', 'МУП', 'ГУП', 'ФГУП', 'КФХ', 'ФБУЗ',
   ];
 
-  for (const form of orgForms) {
-    const idx = normUpper.indexOf(form);
-    if (idx !== -1) {
-      // Берём всё до конца организационной формы
-      const endPos = idx + form.length;
-      let result = s.substring(0, endPos).trim();
-      // Убираем trailing мусор
-      result = result.replace(/[\s,;.\-]+$/, '');
-      if (result.length >= 2) {
-        return result;
-      }
-    }
+  const upperCleaned = s.toUpperCase();
+  if (orgForms.some(form => upperCleaned.includes(form))) {
+    return s;
   }
 
-  // Если организационная форма не найдена — считаем что это ФИО
-  // Берём первые 3 слова
-  const words = s.split(/\s+/).filter(w => w.length > 0);
+  // Физлица: оставляем до 3 слов
+  const words = s.split(/\s+/).filter(Boolean);
   if (words.length <= 3) return words.join(' ');
-
-  // Проверяем, не начинается ли 4-е слово с цифры
   return words.slice(0, 3).join(' ');
 }
 
@@ -211,9 +196,10 @@ function getSelectedSheetNames(sources: DataSource[]): Set<string> {
 
 function buildCounterpartyDictionary(sources: DataSource[]): {
   exactMap: Map<string, string>;
-  normalizedRefs: Array<{ normalized: string; displayName: string }>;
+  hasReferences: boolean;
 } {
   const exactMap = new Map<string, string>();
+  let hasReferences = false;
 
   sources
     .filter(s => s.status === 'ready')
@@ -222,46 +208,48 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
         const displayName = cp.name?.trim();
         if (!displayName) return;
 
-        const normalized = normalizeCounterpartyForMatch(displayName);
+        hasReferences = true;
+
+        const cleaned = cleanCounterparty(displayName);
+        const normalized = normalizeCounterpartyForMatch(cleaned);
         const stripped = stripOrgPrefix(normalized);
 
         if (normalized && !exactMap.has(normalized)) {
           exactMap.set(normalized, displayName);
         }
+
         if (stripped && !exactMap.has(stripped)) {
           exactMap.set(stripped, displayName);
         }
       });
     });
 
-  const normalizedRefs = Array.from(exactMap.entries())
-    .map(([normalized, displayName]) => ({ normalized, displayName }))
-    .sort((a, b) => b.normalized.length - a.normalized.length);
-
-  return { exactMap, normalizedRefs };
+  return { exactMap, hasReferences };
 }
 
 function resolveCounterpartyName(
   rawCounterparty: string,
-  dictionary: { exactMap: Map<string, string>; normalizedRefs: Array<{ normalized: string; displayName: string }> },
+  dictionary: { exactMap: Map<string, string>; hasReferences: boolean },
 ): string {
   const raw = String(rawCounterparty || '').trim();
-  const normalizedTx = normalizeCounterpartyForMatch(raw);
+
+  // Если в журнале/выписке контрагент пустой — оставляем пустым
+  if (!raw) return '';
+
+  const cleaned = cleanCounterparty(raw);
+  const normalizedTx = normalizeCounterpartyForMatch(cleaned);
   const strippedTx = stripOrgPrefix(normalizedTx);
-  if (!normalizedTx) return '';
 
-  const exact = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
-  if (exact) return exact;
+  const found = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
+  if (found) return found;
 
-  const contains = dictionary.normalizedRefs.find((ref) =>
-    normalizedTx.includes(ref.normalized)
-    || ref.normalized.includes(normalizedTx)
-    || (strippedTx && (strippedTx.includes(ref.normalized) || ref.normalized.includes(strippedTx))),
-  );
+  // Если справочник не загружен — показываем очищенное исходное значение
+  if (!dictionary.hasReferences) {
+    return cleaned;
+  }
 
-  if (contains) return contains.displayName;
-
-  return raw;
+  // Если справочник есть, но совпадение не найдено
+  return 'нет в справочнике';
 }
 
 function getAllTransactions(sources: DataSource[]): Transaction[] {
