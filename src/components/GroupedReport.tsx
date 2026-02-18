@@ -50,7 +50,7 @@ export const GroupedReport: React.FC = () => {
       }
 
       const existing = map.get(key);
-      const amount = Math.abs(tx.amount);
+      const amount = tx.amount;
       const inc = tx.direction === 'in' ? amount : 0;
       const exp = tx.direction === 'out' ? amount : 0;
 
