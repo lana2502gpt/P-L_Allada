@@ -15,14 +15,47 @@ interface FlatRow {
   balance: number;
 }
 
+type ColumnFilters = {
+  label: string;
+  subLabel: string;
+  countMin: string;
+  countMax: string;
+  incomeMin: string;
+  incomeMax: string;
+  expenseMin: string;
+  expenseMax: string;
+  balanceMin: string;
+  balanceMax: string;
+};
+
 const fmt = (n: number) =>
   n.toLocaleString('ru-RU', { style: 'currency', currency: 'RUB', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+const initialFilters: ColumnFilters = {
+  label: '',
+  subLabel: '',
+  countMin: '',
+  countMax: '',
+  incomeMin: '',
+  incomeMax: '',
+  expenseMin: '',
+  expenseMax: '',
+  balanceMin: '',
+  balanceMax: '',
+};
+
+const parseOptionalNumber = (value: string): number | null => {
+  if (!value.trim()) return null;
+  const n = Number(value.replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+};
 
 export const GroupedReport: React.FC = () => {
   const { filteredTransactions, cleanCounterparty } = useAppContext();
   const [mode, setMode] = useState<GroupMode>('counterparty-article');
   const [sortField, setSortField] = useState<SortField>('expense');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(initialFilters);
 
   const txs = filteredTransactions;
 
@@ -88,8 +121,35 @@ export const GroupedReport: React.FC = () => {
     return result;
   }, [txs, mode, cleanCounterparty]);
 
+  const filteredRows = useMemo(() => {
+    const countMin = parseOptionalNumber(columnFilters.countMin);
+    const countMax = parseOptionalNumber(columnFilters.countMax);
+    const incomeMin = parseOptionalNumber(columnFilters.incomeMin);
+    const incomeMax = parseOptionalNumber(columnFilters.incomeMax);
+    const expenseMin = parseOptionalNumber(columnFilters.expenseMin);
+    const expenseMax = parseOptionalNumber(columnFilters.expenseMax);
+    const balanceMin = parseOptionalNumber(columnFilters.balanceMin);
+    const balanceMax = parseOptionalNumber(columnFilters.balanceMax);
+
+    return rows.filter((row) => {
+      if (columnFilters.label && !row.label.toLowerCase().includes(columnFilters.label.toLowerCase().trim())) return false;
+      if (columnFilters.subLabel && !row.subLabel.toLowerCase().includes(columnFilters.subLabel.toLowerCase().trim())) return false;
+
+      if (countMin !== null && row.count < countMin) return false;
+      if (countMax !== null && row.count > countMax) return false;
+      if (incomeMin !== null && row.income < incomeMin) return false;
+      if (incomeMax !== null && row.income > incomeMax) return false;
+      if (expenseMin !== null && row.expense < expenseMin) return false;
+      if (expenseMax !== null && row.expense > expenseMax) return false;
+      if (balanceMin !== null && row.balance < balanceMin) return false;
+      if (balanceMax !== null && row.balance > balanceMax) return false;
+
+      return true;
+    });
+  }, [rows, columnFilters]);
+
   const sorted = useMemo(() => {
-    const arr = [...rows];
+    const arr = [...filteredRows];
     arr.sort((a, b) => {
       const va = a[sortField];
       const vb = b[sortField];
@@ -101,34 +161,40 @@ export const GroupedReport: React.FC = () => {
       return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number);
     });
     return arr;
-  }, [rows, sortField, sortDir]);
+  }, [filteredRows, sortField, sortDir]);
 
   const totals = useMemo(() => {
-    let count = 0, income = 0, expense = 0;
-    for (const r of rows) {
+    let count = 0;
+    let income = 0;
+    let expense = 0;
+    for (const r of filteredRows) {
       count += r.count;
       income += r.income;
       expense += r.expense;
     }
     return { count, income, expense, balance: income - expense };
-  }, [rows]);
+  }, [filteredRows]);
 
   const maxAmount = useMemo(() => {
     let m = 0;
-    for (const r of rows) {
-      const total = r.income + r.expense;
+    for (const r of filteredRows) {
+      const total = Math.abs(r.income) + Math.abs(r.expense);
       if (total > m) m = total;
     }
     return m || 1;
-  }, [rows]);
+  }, [filteredRows]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
       setSortField(field);
       setSortDir('desc');
     }
+  };
+
+  const setFilter = (key: keyof ColumnFilters, value: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   const sortIcon = (field: SortField) => {
@@ -142,7 +208,7 @@ export const GroupedReport: React.FC = () => {
 
   const exportToExcel = () => {
     try {
-      const exportRows = sorted.map(r => {
+      const exportRows = sorted.map((r) => {
         const row: Record<string, string | number> = {};
         row[col1Name] = r.label;
         if (isTwoCol) row[col2Name] = r.subLabel;
@@ -167,8 +233,8 @@ export const GroupedReport: React.FC = () => {
       XLSX.utils.book_append_sheet(wb, ws, 'Отчёт');
 
       const keys = Object.keys(exportRows[0] || {});
-      const colWidths = keys.map(key => ({
-        wch: Math.max(key.length, ...exportRows.map(r => String(r[key] ?? '').length)) + 2,
+      const colWidths = keys.map((key) => ({
+        wch: Math.max(key.length, ...exportRows.map((r) => String(r[key] ?? '').length)) + 2,
       }));
       ws['!cols'] = colWidths;
 
@@ -199,7 +265,6 @@ export const GroupedReport: React.FC = () => {
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold text-gray-800">📊 Сводный отчёт</h3>
         <div className="flex items-center gap-2 flex-wrap">
@@ -224,6 +289,12 @@ export const GroupedReport: React.FC = () => {
             ))}
           </div>
           <button
+            onClick={() => setColumnFilters(initialFilters)}
+            className="px-3 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-100"
+          >
+            Сбросить фильтры
+          </button>
+          <button
             onClick={exportToExcel}
             className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium shadow-sm"
           >
@@ -232,12 +303,11 @@ export const GroupedReport: React.FC = () => {
         </div>
       </div>
 
-      {/* Info */}
       <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-sm text-blue-700">
-        Найдено <strong>{rows.length}</strong> {isTwoCol ? 'комбинаций' : 'групп'} · <strong>{totals.count}</strong> операций
+        Найдено <strong>{filteredRows.length}</strong> {isTwoCol ? 'комбинаций' : 'групп'}
+        {' '}из <strong>{rows.length}</strong> · <strong>{totals.count}</strong> операций
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -281,6 +351,35 @@ export const GroupedReport: React.FC = () => {
                 Сальдо {sortIcon('balance')}
               </th>
               <th className="px-4 py-3 font-semibold text-gray-600 w-32">Доля</th>
+            </tr>
+            <tr className="bg-gray-100 border-b border-gray-200">
+              <th className="px-2 py-2"><input value={columnFilters.label} onChange={(e) => setFilter('label', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" /></th>
+              {isTwoCol && <th className="px-2 py-2"><input value={columnFilters.subLabel} onChange={(e) => setFilter('subLabel', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" /></th>}
+              <th className="px-2 py-2">
+                <div className="grid grid-cols-2 gap-1">
+                  <input value={columnFilters.countMin} onChange={(e) => setFilter('countMin', e.target.value)} placeholder="мин" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                  <input value={columnFilters.countMax} onChange={(e) => setFilter('countMax', e.target.value)} placeholder="макс" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                </div>
+              </th>
+              <th className="px-2 py-2">
+                <div className="grid grid-cols-2 gap-1">
+                  <input value={columnFilters.incomeMin} onChange={(e) => setFilter('incomeMin', e.target.value)} placeholder="мин" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                  <input value={columnFilters.incomeMax} onChange={(e) => setFilter('incomeMax', e.target.value)} placeholder="макс" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                </div>
+              </th>
+              <th className="px-2 py-2">
+                <div className="grid grid-cols-2 gap-1">
+                  <input value={columnFilters.expenseMin} onChange={(e) => setFilter('expenseMin', e.target.value)} placeholder="мин" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                  <input value={columnFilters.expenseMax} onChange={(e) => setFilter('expenseMax', e.target.value)} placeholder="макс" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                </div>
+              </th>
+              <th className="px-2 py-2">
+                <div className="grid grid-cols-2 gap-1">
+                  <input value={columnFilters.balanceMin} onChange={(e) => setFilter('balanceMin', e.target.value)} placeholder="мин" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                  <input value={columnFilters.balanceMax} onChange={(e) => setFilter('balanceMax', e.target.value)} placeholder="макс" className="w-full rounded border border-gray-300 px-2 py-1 text-xs" />
+                </div>
+              </th>
+              <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody>

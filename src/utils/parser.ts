@@ -123,29 +123,78 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
     return title || `Колонка ${getColumnLetter(idx)}`;
   });
 
-  const uniqueHeaders = headers.map((h, idx) => (headers.indexOf(h) === idx ? h : `${h} (${getColumnLetter(idx)})`));
+  const headerCounts = new Map<string, number>();
+  const uniqueHeaders = headers.map((h, idx) => {
+    const count = headerCounts.get(h) || 0;
+    headerCounts.set(h, count + 1);
+    if (count === 0) return h;
+    return `${h} (${getColumnLetter(idx)})`;
+  });
 
   const valuesByColumn: Record<string, string[]> = {};
-  uniqueHeaders.forEach((h) => {
-    valuesByColumn[h] = [];
-  });
+  const uniqueValuesByColumn: Record<string, Set<string>> = {};
+<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
+  const headerCount = uniqueHeaders.length;
 
-  for (let r = headerRowIndex + 1; r < data.length; r++) {
-    const row = data[r] || [];
-    uniqueHeaders.forEach((header, c) => {
-      const value = String(row[c] ?? '').trim();
-      if (!value) return;
-      const bucket = valuesByColumn[header];
-      if (!bucket.includes(value)) {
-        bucket.push(value);
-      }
-    });
+  for (let c = 0; c < headerCount; c++) {
+    const header = uniqueHeaders[c];
+    valuesByColumn[header] = [];
+    uniqueValuesByColumn[header] = new Set<string>();
   }
 
-  uniqueHeaders.forEach((header) => {
-    valuesByColumn[header] = valuesByColumn[header].slice(0, 300);
+  const MAX_VALUES_PER_COLUMN = 200;
+  const MAX_ROWS_FOR_PROFILE = 2000;
+  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
+    const row = data[r] || [];
+    let completedColumns = 0;
+
+    for (let c = 0; c < headerCount; c++) {
+      const header = uniqueHeaders[c];
+      const bucket = valuesByColumn[header];
+      if (bucket.length >= MAX_VALUES_PER_COLUMN) {
+        completedColumns += 1;
+        continue;
+      }
+
+      const value = String(row[c] ?? '').trim();
+      if (!value) continue;
+=======
+  uniqueHeaders.forEach((h) => {
+    valuesByColumn[h] = [];
+    uniqueValuesByColumn[h] = new Set<string>();
   });
 
+  const MAX_VALUES_PER_COLUMN = 300;
+  const MAX_ROWS_FOR_PROFILE = 5000;
+  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
+    const row = data[r] || [];
+    uniqueHeaders.forEach((header, c) => {
+      const bucket = valuesByColumn[header];
+      if (bucket.length >= MAX_VALUES_PER_COLUMN) return;
+
+      const value = String(row[c] ?? '').trim();
+      if (!value) return;
+>>>>>>> codex/-spa-8q22rt
+
+      const seen = uniqueValuesByColumn[header];
+      if (!seen.has(value)) {
+        seen.add(value);
+        bucket.push(value);
+      }
+    }
+
+<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
+    if (completedColumns === headerCount) {
+      break;
+    }
+  }
+
+=======
+>>>>>>> codex/-spa-8q22rt
   return {
     sheetName: '',
     columns: uniqueHeaders,
