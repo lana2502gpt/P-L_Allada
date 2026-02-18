@@ -133,6 +133,7 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
 
   const valuesByColumn: Record<string, string[]> = {};
   const uniqueValuesByColumn: Record<string, Set<string>> = {};
+<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
   const headerCount = uniqueHeaders.length;
 
   for (let c = 0; c < headerCount; c++) {
@@ -159,6 +160,25 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
 
       const value = String(row[c] ?? '').trim();
       if (!value) continue;
+=======
+  uniqueHeaders.forEach((h) => {
+    valuesByColumn[h] = [];
+    uniqueValuesByColumn[h] = new Set<string>();
+  });
+
+  const MAX_VALUES_PER_COLUMN = 300;
+  const MAX_ROWS_FOR_PROFILE = 5000;
+  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
+    const row = data[r] || [];
+    uniqueHeaders.forEach((header, c) => {
+      const bucket = valuesByColumn[header];
+      if (bucket.length >= MAX_VALUES_PER_COLUMN) return;
+
+      const value = String(row[c] ?? '').trim();
+      if (!value) return;
+>>>>>>> codex/-spa-8q22rt
 
       const seen = uniqueValuesByColumn[header];
       if (!seen.has(value)) {
@@ -167,11 +187,14 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
       }
     }
 
+<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
     if (completedColumns === headerCount) {
       break;
     }
   }
 
+=======
+>>>>>>> codex/-spa-8q22rt
   return {
     sheetName: '',
     columns: uniqueHeaders,
