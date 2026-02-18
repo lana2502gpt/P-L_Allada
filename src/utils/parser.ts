@@ -133,7 +133,6 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
 
   const valuesByColumn: Record<string, string[]> = {};
   const uniqueValuesByColumn: Record<string, Set<string>> = {};
-<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
   const headerCount = uniqueHeaders.length;
 
   for (let c = 0; c < headerCount; c++) {
@@ -142,8 +141,8 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
     uniqueValuesByColumn[header] = new Set<string>();
   }
 
-  const MAX_VALUES_PER_COLUMN = 200;
-  const MAX_ROWS_FOR_PROFILE = 2000;
+  const MAX_VALUES_PER_COLUMN = 300;
+  const MAX_ROWS_FOR_PROFILE = 5000;
   const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
 
   for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
@@ -160,25 +159,6 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
 
       const value = String(row[c] ?? '').trim();
       if (!value) continue;
-=======
-  uniqueHeaders.forEach((h) => {
-    valuesByColumn[h] = [];
-    uniqueValuesByColumn[h] = new Set<string>();
-  });
-
-  const MAX_VALUES_PER_COLUMN = 300;
-  const MAX_ROWS_FOR_PROFILE = 5000;
-  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
-
-  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
-    const row = data[r] || [];
-    uniqueHeaders.forEach((header, c) => {
-      const bucket = valuesByColumn[header];
-      if (bucket.length >= MAX_VALUES_PER_COLUMN) return;
-
-      const value = String(row[c] ?? '').trim();
-      if (!value) return;
->>>>>>> codex/-spa-8q22rt
 
       const seen = uniqueValuesByColumn[header];
       if (!seen.has(value)) {
@@ -187,14 +167,11 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
       }
     }
 
-<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
     if (completedColumns === headerCount) {
       break;
     }
   }
 
-=======
->>>>>>> codex/-spa-8q22rt
   return {
     sheetName: '',
     columns: uniqueHeaders,
@@ -574,8 +551,14 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
   });
 
   const visibleSheetNames = getVisibleSheetNames(workbook);
+  const cachedSheets: Array<{
+    name: string;
+    data: unknown[][];
+    headerRowIndex: number;
+    type: SheetType;
+  }> = [];
 
-  // Первый проход: найти справочник
+  // Подготовка кэшированных данных листов + профили + справочник
   for (const sheetName of visibleSheetNames) {
     const ws = workbook.Sheets[sheetName];
     const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -583,6 +566,14 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
 
     const { headerRowIndex, headers } = findHeaderRow(data);
     const type = detectSheetType(sheetName, headers);
+
+    cachedSheets.push({
+      name: sheetName,
+      data,
+      headerRowIndex,
+      type,
+    });
+
     const profile = buildSheetProfile(data, headerRowIndex);
     profile.sheetName = sheetName;
     sheetProfiles.push(profile);
@@ -595,31 +586,26 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
     }
   }
 
-  // Второй проход: парсить журналы
-  for (const sheetName of visibleSheetNames) {
-    const ws = workbook.Sheets[sheetName];
-    const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    if (data.length === 0) continue;
-
-    const { headerRowIndex, headers } = findHeaderRow(data);
-    const type = detectSheetType(sheetName, headers);
+  // Парсинг журналов по кэшированным данным
+  for (const sheet of cachedSheets) {
+    const { name, data, headerRowIndex, type } = sheet;
 
     if (type === 'cash_journal') {
-      const txs = parseCashJournal(data, sheetName, sourceName, articles, headerRowIndex);
+      const txs = parseCashJournal(data, name, sourceName, articles, headerRowIndex);
       allTransactions.push(...txs);
-      sheets.push(mkSheet(sheetName, 'cash_journal', txs.length));
+      sheets.push(mkSheet(name, 'cash_journal', txs.length));
     } else if (type === 'bank_journal') {
-      const txs = parseBankJournal(data, sheetName, sourceName, articles, headerRowIndex);
+      const txs = parseBankJournal(data, name, sourceName, articles, headerRowIndex);
       allTransactions.push(...txs);
-      sheets.push(mkSheet(sheetName, 'bank_journal', txs.length));
+      sheets.push(mkSheet(name, 'bank_journal', txs.length));
     } else if (type !== 'reference') {
       // Не удалось определить — попробуем как кассу, если есть дата и сумма
-      const fallbackTxs = tryParseFallback(data, sheetName, sourceName, articles, headerRowIndex);
+      const fallbackTxs = tryParseFallback(data, name, sourceName, articles, headerRowIndex);
       if (fallbackTxs.length > 0) {
         allTransactions.push(...fallbackTxs);
-        sheets.push(mkSheet(sheetName, 'cash_journal', fallbackTxs.length));
+        sheets.push(mkSheet(name, 'cash_journal', fallbackTxs.length));
       } else {
-        sheets.push(mkSheet(sheetName, 'unknown', 0));
+        sheets.push(mkSheet(name, 'unknown', 0));
       }
     }
   }
