@@ -8,9 +8,23 @@ function cleanCounterparty(raw: string): string {
   let s = raw.trim();
   if (!s) return '';
 
-  // В выписках контрагент часто в первой строке, ниже — детали документа
-  const firstLine = s.split(/\r?\n/).map(part => part.trim()).find(Boolean);
-  if (firstLine) s = firstLine;
+  // В выписках контрагент может быть не в первой строке (первая часто — служебная)
+  const lines = s.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    const operationMarkers = ['СПИСАНИЕ', 'ПОСТУПЛЕНИЕ', 'ОПЛАТА', 'ПЕРЕВОД', 'ВОЗВРАТ', 'НАЗНАЧЕНИЕ'];
+    const isOperationLine = (line: string) => {
+      const upperLine = line.toUpperCase();
+      return operationMarkers.some(marker => upperLine.startsWith(marker));
+    };
+
+    const firstLine = lines[0];
+    if (!isOperationLine(firstLine)) {
+      s = firstLine;
+    } else {
+      const fallback = lines.find(line => !isOperationLine(line));
+      if (fallback) s = fallback;
+    }
+  }
 
   // Замена английских букв на русские аналоги для унификации
   const engToRus: Record<string, string> = {
