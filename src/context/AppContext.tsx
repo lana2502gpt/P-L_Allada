@@ -8,18 +8,32 @@ function cleanCounterparty(raw: string): string {
   let s = raw.trim();
   if (!s) return '';
 
-  // В выписках контрагент часто в первой строке, ниже — детали документа
-  const firstLine = s.split(/\r?\n/).map(part => part.trim()).find(Boolean);
-  if (firstLine) s = firstLine;
-
-  // Замена английских букв на русские аналоги для унификации
+  // Замена похожих английских букв на русские аналоги для унификации
   const engToRus: Record<string, string> = {
     'A': 'А', 'B': 'В', 'C': 'С', 'E': 'Е', 'H': 'Н', 'K': 'К',
-    'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х',
-    'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х',
+    'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х', 'V': 'В',
+    'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х', 'v': 'в',
   };
-
   s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
+
+  // В выписках контрагент может быть не в первой строке (первая — "Списание...")
+  const lines = s.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    const orgMarkers = ['ООО', 'ОАО', 'ЗАО', 'ПАО', 'АО', 'ИП', 'НКО', 'НАО', 'ГБУЗ', 'ГУП', 'МУП', 'ФГУП', 'БАНК', 'LLC', 'LTD', 'INC'];
+    const operationMarkers = ['СПИСАНИЕ', 'ПОСТУПЛЕНИЕ', 'ОПЛАТА', 'ПЕРЕВОД', 'ВОЗВРАТ'];
+
+    const orgLike = lines.find((line) => {
+      const upperLine = line.toUpperCase();
+      return orgMarkers.some(marker => upperLine.includes(marker));
+    });
+
+    const nonOperation = lines.find((line) => {
+      const upperLine = line.toUpperCase();
+      return !operationMarkers.some(marker => upperLine.startsWith(marker));
+    });
+
+    s = orgLike || nonOperation || lines[0];
+  }
 
   const upper = s.toUpperCase();
 
@@ -65,6 +79,7 @@ function cleanCounterparty(raw: string): string {
   if (words.length <= 3) return words.join(' ');
   return words.slice(0, 3).join(' ');
 }
+
 
 function normalizeCounterpartyForMatch(raw: string): string {
   return String(raw || '')
