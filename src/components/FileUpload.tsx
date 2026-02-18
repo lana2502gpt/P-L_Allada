@@ -190,10 +190,11 @@ export function FileUpload() {
     const profile = source?.sheetProfiles.find(sp => sp.sheetName === config.sheetName);
     if (!profile) return [] as string[];
 
-    return (profile.valuesByColumn[config.columnName] || [])
+    const values = (profile.valuesByColumn[config.columnName] || [])
       .map(v => String(v || '').trim())
-      .filter(Boolean)
-      .filter((value, idx, arr) => arr.indexOf(value) === idx);
+      .filter(Boolean);
+
+    return Array.from(new Set(values));
   };
 
 

@@ -123,28 +123,54 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
     return title || `Колонка ${getColumnLetter(idx)}`;
   });
 
-  const uniqueHeaders = headers.map((h, idx) => (headers.indexOf(h) === idx ? h : `${h} (${getColumnLetter(idx)})`));
+  const headerCounts = new Map<string, number>();
+  const uniqueHeaders = headers.map((h, idx) => {
+    const count = headerCounts.get(h) || 0;
+    headerCounts.set(h, count + 1);
+    if (count === 0) return h;
+    return `${h} (${getColumnLetter(idx)})`;
+  });
 
   const valuesByColumn: Record<string, string[]> = {};
-  uniqueHeaders.forEach((h) => {
-    valuesByColumn[h] = [];
-  });
+  const uniqueValuesByColumn: Record<string, Set<string>> = {};
+  const headerCount = uniqueHeaders.length;
 
-  for (let r = headerRowIndex + 1; r < data.length; r++) {
-    const row = data[r] || [];
-    uniqueHeaders.forEach((header, c) => {
-      const value = String(row[c] ?? '').trim();
-      if (!value) return;
-      const bucket = valuesByColumn[header];
-      if (!bucket.includes(value)) {
-        bucket.push(value);
-      }
-    });
+  for (let c = 0; c < headerCount; c++) {
+    const header = uniqueHeaders[c];
+    valuesByColumn[header] = [];
+    uniqueValuesByColumn[header] = new Set<string>();
   }
 
-  uniqueHeaders.forEach((header) => {
-    valuesByColumn[header] = valuesByColumn[header].slice(0, 300);
-  });
+  const MAX_VALUES_PER_COLUMN = 300;
+  const MAX_ROWS_FOR_PROFILE = 5000;
+  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
+    const row = data[r] || [];
+    let completedColumns = 0;
+
+    for (let c = 0; c < headerCount; c++) {
+      const header = uniqueHeaders[c];
+      const bucket = valuesByColumn[header];
+      if (bucket.length >= MAX_VALUES_PER_COLUMN) {
+        completedColumns += 1;
+        continue;
+      }
+
+      const value = String(row[c] ?? '').trim();
+      if (!value) continue;
+
+      const seen = uniqueValuesByColumn[header];
+      if (!seen.has(value)) {
+        seen.add(value);
+        bucket.push(value);
+      }
+    }
+
+    if (completedColumns === headerCount) {
+      break;
+    }
+  }
 
   return {
     sheetName: '',
@@ -259,15 +285,29 @@ function parseDate(value: unknown): Date | null {
 
 function parseAmount(value: unknown): number {
   if (!value) return 0;
-  if (typeof value === 'number') return Math.abs(value);
+  if (typeof value === 'number') return value;
 
-  const str = String(value)
-    .replace(/\s/g, '')
+  const raw = String(value).trim();
+  if (!raw) return 0;
+
+  // Поддержка разных форматов отрицательных сумм:
+  // -65413,01 / 65413,01- / (65413,01) / −65413,01
+  const normalizedMinus = raw.replace(/[−–—]/g, '-');
+  const compact = normalizedMinus.replace(/\s/g, '');
+  const hasParenNegative = /^\(.*\)$/.test(compact);
+  const hasTrailingMinus = /-$/.test(compact);
+  const hasLeadingMinus = /^-/.test(compact);
+
+  const sign = hasParenNegative || hasTrailingMinus || hasLeadingMinus ? -1 : 1;
+
+  const str = compact
+    .replace(/[()]/g, '')
+    .replace(/-/g, '')
     .replace(/,/g, '.')
-    .replace(/[^\d.\-]/g, '');
+    .replace(/[^\d.]/g, '');
 
   const num = parseFloat(str);
-  return isNaN(num) ? 0 : Math.abs(num);
+  return isNaN(num) ? 0 : sign * num;
 }
 
 // ========== Нормализация заголовков ==========
@@ -511,8 +551,14 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
   });
 
   const visibleSheetNames = getVisibleSheetNames(workbook);
+  const cachedSheets: Array<{
+    name: string;
+    data: unknown[][];
+    headerRowIndex: number;
+    type: SheetType;
+  }> = [];
 
-  // Первый проход: найти справочник
+  // Подготовка кэшированных данных листов + профили + справочник
   for (const sheetName of visibleSheetNames) {
     const ws = workbook.Sheets[sheetName];
     const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
@@ -520,6 +566,14 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
 
     const { headerRowIndex, headers } = findHeaderRow(data);
     const type = detectSheetType(sheetName, headers);
+
+    cachedSheets.push({
+      name: sheetName,
+      data,
+      headerRowIndex,
+      type,
+    });
+
     const profile = buildSheetProfile(data, headerRowIndex);
     profile.sheetName = sheetName;
     sheetProfiles.push(profile);
@@ -532,31 +586,26 @@ export function parseWorkbook(workbook: XLSX.WorkBook, sourceName: string): Omit
     }
   }
 
-  // Второй проход: парсить журналы
-  for (const sheetName of visibleSheetNames) {
-    const ws = workbook.Sheets[sheetName];
-    const data: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-    if (data.length === 0) continue;
-
-    const { headerRowIndex, headers } = findHeaderRow(data);
-    const type = detectSheetType(sheetName, headers);
+  // Парсинг журналов по кэшированным данным
+  for (const sheet of cachedSheets) {
+    const { name, data, headerRowIndex, type } = sheet;
 
     if (type === 'cash_journal') {
-      const txs = parseCashJournal(data, sheetName, sourceName, articles, headerRowIndex);
+      const txs = parseCashJournal(data, name, sourceName, articles, headerRowIndex);
       allTransactions.push(...txs);
-      sheets.push(mkSheet(sheetName, 'cash_journal', txs.length));
+      sheets.push(mkSheet(name, 'cash_journal', txs.length));
     } else if (type === 'bank_journal') {
-      const txs = parseBankJournal(data, sheetName, sourceName, articles, headerRowIndex);
+      const txs = parseBankJournal(data, name, sourceName, articles, headerRowIndex);
       allTransactions.push(...txs);
-      sheets.push(mkSheet(sheetName, 'bank_journal', txs.length));
+      sheets.push(mkSheet(name, 'bank_journal', txs.length));
     } else if (type !== 'reference') {
       // Не удалось определить — попробуем как кассу, если есть дата и сумма
-      const fallbackTxs = tryParseFallback(data, sheetName, sourceName, articles, headerRowIndex);
+      const fallbackTxs = tryParseFallback(data, name, sourceName, articles, headerRowIndex);
       if (fallbackTxs.length > 0) {
         allTransactions.push(...fallbackTxs);
-        sheets.push(mkSheet(sheetName, 'cash_journal', fallbackTxs.length));
+        sheets.push(mkSheet(name, 'cash_journal', fallbackTxs.length));
       } else {
-        sheets.push(mkSheet(sheetName, 'unknown', 0));
+        sheets.push(mkSheet(name, 'unknown', 0));
       }
     }
   }
