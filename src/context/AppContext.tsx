@@ -35,18 +35,6 @@ function cleanCounterparty(raw: string): string {
   };
   s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
 
-  // В выписках контрагент может быть не в первой строке (первая — "Списание...")
-  const lines = s.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
-  if (lines.length > 0) {
-    const operationLineRegex = /^(списание|поступление|оплата|перевод|возврат|договор|счет|счёт|назначение|без договора)\b/i;
-    const orgFormRegex = /(^|\s|["«(])(ооо|оао|зао|пао|ао|ип|нко|нао|гбуз|гуп|муп|фгуп|банк|llc|ltd|inc)(\s|$|[)"».,;:])/i;
-
-    const orgLike = lines.find((line) => orgFormRegex.test(line) && !operationLineRegex.test(line));
-    const nonOperation = lines.find((line) => !operationLineRegex.test(line));
-
-    s = orgLike || nonOperation || lines[0];
-  }
-
   const upper = s.toUpperCase();
 
   // Стоп-фразы — обрезаем всё начиная с них
