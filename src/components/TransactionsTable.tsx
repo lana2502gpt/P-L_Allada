@@ -111,7 +111,7 @@ export function TransactionsTable() {
                 <td className={`whitespace-nowrap px-3 py-2 text-xs font-semibold text-right ${
                   t.direction === 'in' ? 'text-green-600' : 'text-red-600'
                 }`}>
-                  {t.direction === 'in' ? '+' : '−'}{formatMoney(t.amount)}
+                  {formatMoney(t.amount)}
                 </td>
                 <td className="max-w-[180px] truncate px-3 py-2 text-xs text-slate-500" title={t.note}>{t.note || '—'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-500">{t.accrualMonth || '—'}</td>
@@ -124,8 +124,8 @@ export function TransactionsTable() {
                 Итого:
               </td>
               <td className="whitespace-nowrap px-3 py-2 text-right">
-                <div className="text-xs font-bold text-green-600">+{formatMoney(totalSum.inSum)}</div>
-                <div className="text-xs font-bold text-red-600">−{formatMoney(totalSum.outSum)}</div>
+                <div className="text-xs font-bold text-green-600">{formatMoney(totalSum.inSum)}</div>
+                <div className="text-xs font-bold text-red-600">{formatMoney(totalSum.outSum)}</div>
               </td>
               <td colSpan={2}></td>
             </tr>

@@ -259,7 +259,7 @@ function parseDate(value: unknown): Date | null {
 
 function parseAmount(value: unknown): number {
   if (!value) return 0;
-  if (typeof value === 'number') return Math.abs(value);
+  if (typeof value === 'number') return value;
 
   const str = String(value)
     .replace(/\s/g, '')
@@ -267,7 +267,7 @@ function parseAmount(value: unknown): number {
     .replace(/[^\d.\-]/g, '');
 
   const num = parseFloat(str);
-  return isNaN(num) ? 0 : Math.abs(num);
+  return isNaN(num) ? 0 : num;
 }
 
 // ========== Нормализация заголовков ==========
