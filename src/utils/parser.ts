@@ -132,53 +132,34 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
   });
 
   const valuesByColumn: Record<string, string[]> = {};
-  const uniqueValuesByColumn: Record<string, Set<string>> = {};
-<<<<<<< codex/fix-data-calculation-for-negative-values-m2e1or
-  const headerCount = uniqueHeaders.length;
+const uniqueValuesByColumn: Record<string, Set<string>> = {};
+
+const headerCount = uniqueHeaders.length;
+
+for (let c = 0; c < headerCount; c++) {
+  const header = uniqueHeaders[c];
+  valuesByColumn[header] = [];
+  uniqueValuesByColumn[header] = new Set<string>();
+}
+
+const MAX_VALUES_PER_COLUMN = 200;
+const MAX_ROWS_FOR_PROFILE = 2000;
+const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
+  const row = data[r] || [];
+  let completedColumns = 0;
 
   for (let c = 0; c < headerCount; c++) {
     const header = uniqueHeaders[c];
-    valuesByColumn[header] = [];
-    uniqueValuesByColumn[header] = new Set<string>();
-  }
+    const bucket = valuesByColumn[header];
+    if (bucket.length >= MAX_VALUES_PER_COLUMN) {
+      completedColumns += 1;
+      continue;
+    }
 
-  const MAX_VALUES_PER_COLUMN = 200;
-  const MAX_ROWS_FOR_PROFILE = 2000;
-  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
-
-  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
-    const row = data[r] || [];
-    let completedColumns = 0;
-
-    for (let c = 0; c < headerCount; c++) {
-      const header = uniqueHeaders[c];
-      const bucket = valuesByColumn[header];
-      if (bucket.length >= MAX_VALUES_PER_COLUMN) {
-        completedColumns += 1;
-        continue;
-      }
-
-      const value = String(row[c] ?? '').trim();
-      if (!value) continue;
-=======
-  uniqueHeaders.forEach((h) => {
-    valuesByColumn[h] = [];
-    uniqueValuesByColumn[h] = new Set<string>();
-  });
-
-  const MAX_VALUES_PER_COLUMN = 300;
-  const MAX_ROWS_FOR_PROFILE = 5000;
-  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
-
-  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
-    const row = data[r] || [];
-    uniqueHeaders.forEach((header, c) => {
-      const bucket = valuesByColumn[header];
-      if (bucket.length >= MAX_VALUES_PER_COLUMN) return;
-
-      const value = String(row[c] ?? '').trim();
-      if (!value) return;
->>>>>>> codex/-spa-8q22rt
+    const value = String(row[c] ?? '').trim();
+    if (!value) continue;
 
       const seen = uniqueValuesByColumn[header];
       if (!seen.has(value)) {
