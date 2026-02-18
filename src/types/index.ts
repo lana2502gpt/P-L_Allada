@@ -6,7 +6,7 @@ export interface Transaction {
   sheet: string;        // имя листа (журнала)
   sheetType: SheetType;
   wallet: string;
-  amount: number;       // всегда положительное
+  amount: number;       // может быть отрицательным (учитываем знак из источника)
   direction: 'in' | 'out';
   note: string;
   branch: string;

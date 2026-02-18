@@ -8,15 +8,30 @@ function cleanCounterparty(raw: string): string {
   let s = raw.trim();
   if (!s) return '';
 
-  // В выписках контрагент часто в первой строке, ниже — детали документа
-  const firstLine = s.split(/\r?\n/).map(part => part.trim()).find(Boolean);
-  if (firstLine) s = firstLine;
+  // В выписках контрагент может быть не в первой строке (первая часто — служебная)
+  const lines = s.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    // Берём первую неслужебную строку, чтобы не использовать техническое описание операции.
+    const operationMarkers = ['СПИСАНИЕ', 'ПОСТУПЛЕНИЕ', 'ОПЛАТА', 'ПЕРЕВОД', 'ВОЗВРАТ', 'НАЗНАЧЕНИЕ'];
+    const isOperationLine = (line: string) => {
+      const upperLine = line.toUpperCase();
+      return operationMarkers.some(marker => upperLine.startsWith(marker));
+    };
+
+    const firstLine = lines[0];
+    if (!isOperationLine(firstLine)) {
+      s = firstLine;
+    } else {
+      const fallback = lines.find(line => !isOperationLine(line));
+      if (fallback) s = fallback;
+    }
+  }
 
   // Замена английских букв на русские аналоги для унификации
   const engToRus: Record<string, string> = {
     'A': 'А', 'B': 'В', 'C': 'С', 'E': 'Е', 'H': 'Н', 'K': 'К',
-    'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х',
-    'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х',
+    'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х', 'V': 'В',
+    'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х', 'v': 'в',
   };
 
   s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
@@ -75,28 +90,47 @@ function normalizeCounterpartyForMatch(raw: string): string {
     .trim();
 }
 
-function stripOrgPrefix(normalized: string): string {
-  const prefixes = [
-    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
-    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
-  ];
+const ORG_TOKENS = [
+  'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
+  'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+];
 
+function stripOrgPrefix(normalized: string): string {
   const parts = normalized.split(' ').filter(Boolean);
   let idx = 0;
-  while (idx < parts.length && prefixes.includes(parts[idx])) {
+  while (idx < parts.length && ORG_TOKENS.includes(parts[idx])) {
     idx += 1;
   }
   return parts.slice(idx).join(' ').trim();
 }
 
+function trimTrailingShortTokens(normalized: string): string {
+  const parts = normalized.split(' ').filter(Boolean);
+  while (parts.length > 1) {
+    const last = parts[parts.length - 1];
+    if (/^[а-яёa-z]{1,2}$/i.test(last) && !ORG_TOKENS.includes(last)) {
+      parts.pop();
+      continue;
+    }
+    break;
+  }
+  return parts.join(' ').trim();
+}
 
+function stripOrgTokensAnywhere(normalized: string): string {
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .filter(token => !ORG_TOKENS.includes(token))
+    .join(' ')
+    .trim();
+}
 
 function buildTokenSignature(normalized: string): string {
   if (!normalized) return '';
 
   const stopTokens = new Set([
-    'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
-    'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
+    ...ORG_TOKENS,
     'и', 'в', 'по', 'на', 'для', 'от', 'с', 'к',
   ]);
 
@@ -243,7 +277,9 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
         const cleaned = cleanCounterparty(displayName);
         const normalized = normalizeCounterpartyForMatch(cleaned);
         const stripped = stripOrgPrefix(normalized);
-        const signature = buildTokenSignature(stripped || normalized);
+        const trimmed = trimTrailingShortTokens(normalized);
+        const orgAgnostic = stripOrgTokensAnywhere(normalized);
+        const signature = buildTokenSignature(trimmed || orgAgnostic || stripped || normalized);
 
         if (normalized && !exactMap.has(normalized)) {
           exactMap.set(normalized, displayName);
@@ -251,6 +287,14 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
 
         if (stripped && !exactMap.has(stripped)) {
           exactMap.set(stripped, displayName);
+        }
+
+        if (trimmed && !exactMap.has(trimmed)) {
+          exactMap.set(trimmed, displayName);
+        }
+
+        if (orgAgnostic && !exactMap.has(orgAgnostic)) {
+          exactMap.set(orgAgnostic, displayName);
         }
 
         if (signature && !tokenMap.has(signature)) {
@@ -274,11 +318,16 @@ function resolveCounterpartyName(
   const cleaned = cleanCounterparty(raw);
   const normalizedTx = normalizeCounterpartyForMatch(cleaned);
   const strippedTx = stripOrgPrefix(normalizedTx);
+  const trimmedTx = trimTrailingShortTokens(normalizedTx);
+  const orgAgnosticTx = stripOrgTokensAnywhere(normalizedTx);
 
-  const found = dictionary.exactMap.get(normalizedTx) || dictionary.exactMap.get(strippedTx);
+  const found = dictionary.exactMap.get(normalizedTx)
+    || dictionary.exactMap.get(strippedTx)
+    || dictionary.exactMap.get(trimmedTx)
+    || dictionary.exactMap.get(orgAgnosticTx);
   if (found) return found;
 
-  const signature = buildTokenSignature(strippedTx || normalizedTx);
+  const signature = buildTokenSignature(trimmedTx || orgAgnosticTx || strippedTx || normalizedTx);
   if (signature && dictionary.tokenMap.has(signature)) {
     return dictionary.tokenMap.get(signature) || cleaned;
   }
