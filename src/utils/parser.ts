@@ -141,9 +141,20 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
     uniqueValuesByColumn[header] = new Set<string>();
   }
 
-  const MAX_VALUES_PER_COLUMN = 300;
+  const DEFAULT_MAX_VALUES_PER_COLUMN = 300;
+  const HIGH_LIMIT_VALUES_PER_COLUMN = 5000;
   const MAX_ROWS_FOR_PROFILE = 5000;
   const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  const getColumnLimit = (header: string): number => {
+    const h = normalizeHeader(header);
+    // Для справочников (контрагенты/статьи) нужен высокий лимит,
+    // иначе в UI показывается только часть значений (например, первые 300).
+    if (h.includes('контрагент') || h.includes('статья')) {
+      return HIGH_LIMIT_VALUES_PER_COLUMN;
+    }
+    return DEFAULT_MAX_VALUES_PER_COLUMN;
+  };
 
   for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
     const row = data[r] || [];
@@ -152,7 +163,8 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
     for (let c = 0; c < headerCount; c++) {
       const header = uniqueHeaders[c];
       const bucket = valuesByColumn[header];
-      if (bucket.length >= MAX_VALUES_PER_COLUMN) {
+      const columnLimit = getColumnLimit(header);
+      if (bucket.length >= columnLimit) {
         completedColumns += 1;
         continue;
       }
