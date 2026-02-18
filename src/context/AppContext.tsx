@@ -32,8 +32,19 @@ function cleanCounterparty(raw: string): string {
     'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х', 'V': 'В',
     'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х', 'v': 'в',
   };
-
   s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
+
+  // В выписках контрагент может быть не в первой строке (первая — "Списание...")
+  const lines = s.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
+  if (lines.length > 0) {
+    const operationLineRegex = /^(списание|поступление|оплата|перевод|возврат|договор|счет|счёт|назначение|без договора)\b/i;
+    const orgFormRegex = /(^|\s|["«(])(ооо|оао|зао|пао|ао|ип|нко|нао|гбуз|гуп|муп|фгуп|банк|llc|ltd|inc)(\s|$|[)"».,;:])/i;
+
+    const orgLike = lines.find((line) => orgFormRegex.test(line) && !operationLineRegex.test(line));
+    const nonOperation = lines.find((line) => !operationLineRegex.test(line));
+
+    s = orgLike || nonOperation || lines[0];
+  }
 
   const upper = s.toUpperCase();
 
@@ -79,6 +90,7 @@ function cleanCounterparty(raw: string): string {
   if (words.length <= 3) return words.join(' ');
   return words.slice(0, 3).join(' ');
 }
+
 
 function normalizeCounterpartyForMatch(raw: string): string {
   return String(raw || '')
@@ -138,7 +150,7 @@ function buildTokenSignature(normalized: string): string {
     .map(t => t.trim())
     .filter(Boolean)
     .filter(t => !stopTokens.has(t))
-    .filter(t => t.length >= 3)
+    .filter(t => t.length >= 2)
     .filter(t => !/\d/.test(t))
     .filter(t => /^[a-zа-яё-]+$/i.test(t))
     .sort();
