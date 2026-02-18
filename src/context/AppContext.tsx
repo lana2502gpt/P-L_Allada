@@ -101,7 +101,7 @@ function normalizeCounterpartyForMatch(raw: string): string {
     .trim();
 }
 
-const ORG_TOKENS = [
+const ORG_PREFIXES = [
   'ооо', 'оао', 'зао', 'пао', 'ао', 'ип', 'нко', 'нао',
   'фбуз', 'гбуз', 'фгуп', 'гуп', 'муп', 'кфх', 'банк',
 ];
@@ -109,30 +109,17 @@ const ORG_TOKENS = [
 function stripOrgPrefix(normalized: string): string {
   const parts = normalized.split(' ').filter(Boolean);
   let idx = 0;
-  while (idx < parts.length && ORG_TOKENS.includes(parts[idx])) {
+  while (idx < parts.length && ORG_PREFIXES.includes(parts[idx])) {
     idx += 1;
   }
   return parts.slice(idx).join(' ').trim();
 }
 
-function trimTrailingShortTokens(normalized: string): string {
-  const parts = normalized.split(' ').filter(Boolean);
-  while (parts.length > 1) {
-    const last = parts[parts.length - 1];
-    if (/^[а-яёa-z]{1,2}$/i.test(last) && !ORG_TOKENS.includes(last)) {
-      parts.pop();
-      continue;
-    }
-    break;
-  }
-  return parts.join(' ').trim();
-}
-
-function stripOrgTokensAnywhere(normalized: string): string {
+function stripOrgTokens(normalized: string): string {
   return normalized
     .split(' ')
     .filter(Boolean)
-    .filter(token => !ORG_TOKENS.includes(token))
+    .filter((token) => !ORG_PREFIXES.includes(token))
     .join(' ')
     .trim();
 }
@@ -141,7 +128,7 @@ function buildTokenSignature(normalized: string): string {
   if (!normalized) return '';
 
   const stopTokens = new Set([
-    ...ORG_TOKENS,
+    ...ORG_PREFIXES,
     'и', 'в', 'по', 'на', 'для', 'от', 'с', 'к',
   ]);
 
@@ -288,9 +275,8 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
         const cleaned = cleanCounterparty(displayName);
         const normalized = normalizeCounterpartyForMatch(cleaned);
         const stripped = stripOrgPrefix(normalized);
-        const trimmed = trimTrailingShortTokens(normalized);
-        const orgAgnostic = stripOrgTokensAnywhere(normalized);
-        const signature = buildTokenSignature(trimmed || orgAgnostic || stripped || normalized);
+        const compactOrgAgnostic = stripOrgTokens(normalized);
+        const signature = buildTokenSignature(compactOrgAgnostic || stripped || normalized);
 
         if (normalized && !exactMap.has(normalized)) {
           exactMap.set(normalized, displayName);
@@ -300,12 +286,8 @@ function buildCounterpartyDictionary(sources: DataSource[]): {
           exactMap.set(stripped, displayName);
         }
 
-        if (trimmed && !exactMap.has(trimmed)) {
-          exactMap.set(trimmed, displayName);
-        }
-
-        if (orgAgnostic && !exactMap.has(orgAgnostic)) {
-          exactMap.set(orgAgnostic, displayName);
+        if (compactOrgAgnostic && !exactMap.has(compactOrgAgnostic)) {
+          exactMap.set(compactOrgAgnostic, displayName);
         }
 
         if (signature && !tokenMap.has(signature)) {
@@ -329,16 +311,14 @@ function resolveCounterpartyName(
   const cleaned = cleanCounterparty(raw);
   const normalizedTx = normalizeCounterpartyForMatch(cleaned);
   const strippedTx = stripOrgPrefix(normalizedTx);
-  const trimmedTx = trimTrailingShortTokens(normalizedTx);
-  const orgAgnosticTx = stripOrgTokensAnywhere(normalizedTx);
+  const compactOrgAgnosticTx = stripOrgTokens(normalizedTx);
 
   const found = dictionary.exactMap.get(normalizedTx)
     || dictionary.exactMap.get(strippedTx)
-    || dictionary.exactMap.get(trimmedTx)
-    || dictionary.exactMap.get(orgAgnosticTx);
+    || dictionary.exactMap.get(compactOrgAgnosticTx);
   if (found) return found;
 
-  const signature = buildTokenSignature(trimmedTx || orgAgnosticTx || strippedTx || normalizedTx);
+  const signature = buildTokenSignature(compactOrgAgnosticTx || strippedTx || normalizedTx);
   if (signature && dictionary.tokenMap.has(signature)) {
     return dictionary.tokenMap.get(signature) || cleaned;
   }
