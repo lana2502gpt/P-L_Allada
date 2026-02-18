@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
-import { ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowUpDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import type { Transaction } from '@/types';
+import * as XLSX from 'xlsx';
 
 const PAGE_SIZE = 50;
 
@@ -19,14 +20,63 @@ function formatMoney(n: number): string {
 
 type SortKey = 'date' | 'amount' | 'article' | 'sheet' | 'counterparty' | 'branch';
 
+type ColumnFilters = {
+  date: string;
+  sheet: string;
+  source: string;
+  branch: string;
+  counterparty: string;
+  article: string;
+  amount: string;
+  note: string;
+  accrualMonth: string;
+};
+
+const initialColumnFilters: ColumnFilters = {
+  date: '',
+  sheet: '',
+  source: '',
+  branch: '',
+  counterparty: '',
+  article: '',
+  amount: '',
+  note: '',
+  accrualMonth: '',
+};
+
+const normalize = (v: string) => String(v || '').toLowerCase().trim();
+
 export function TransactionsTable() {
   const { filteredTransactions } = useAppContext();
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(0);
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(initialColumnFilters);
+
+  const columnFiltered = useMemo(() => {
+    return filteredTransactions.filter((t) => {
+      const dateStr = formatDate(t.date);
+      const amountStr = formatMoney(t.amount);
+
+      if (columnFilters.date && !normalize(dateStr).includes(normalize(columnFilters.date))) return false;
+      if (columnFilters.sheet && !normalize(t.sheet).includes(normalize(columnFilters.sheet))) return false;
+      if (columnFilters.source && !normalize(t.source).includes(normalize(columnFilters.source))) return false;
+      if (columnFilters.branch && !normalize(t.branch).includes(normalize(columnFilters.branch))) return false;
+      if (columnFilters.counterparty && !normalize(t.counterparty).includes(normalize(columnFilters.counterparty))) return false;
+      if (columnFilters.article && !normalize(t.article).includes(normalize(columnFilters.article))) return false;
+      if (columnFilters.amount) {
+        const f = normalize(columnFilters.amount);
+        if (!normalize(amountStr).includes(f) && !String(t.amount).includes(f)) return false;
+      }
+      if (columnFilters.note && !normalize(t.note).includes(normalize(columnFilters.note))) return false;
+      if (columnFilters.accrualMonth && !normalize(t.accrualMonth).includes(normalize(columnFilters.accrualMonth))) return false;
+
+      return true;
+    });
+  }, [filteredTransactions, columnFilters]);
 
   const sorted = useMemo(() => {
-    const arr = [...filteredTransactions];
+    const arr = [...columnFiltered];
     arr.sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
@@ -40,19 +90,24 @@ export function TransactionsTable() {
       return sortAsc ? cmp : -cmp;
     });
     return arr;
-  }, [filteredTransactions, sortKey, sortAsc]);
+  }, [columnFiltered, sortKey, sortAsc]);
 
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const pageData = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const totalSum = useMemo(() => {
-    let inSum = 0, outSum = 0;
-    for (const t of filteredTransactions) {
+    let inSum = 0;
+    let outSum = 0;
+    for (const t of columnFiltered) {
       if (t.direction === 'in') inSum += t.amount;
       else outSum += t.amount;
     }
     return { inSum, outSum };
-  }, [filteredTransactions]);
+  }, [columnFiltered]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [columnFilters, sortKey, sortAsc]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -62,6 +117,49 @@ export function TransactionsTable() {
       setSortAsc(true);
     }
     setPage(0);
+  };
+
+  const setFilter = (key: keyof ColumnFilters, value: string) => {
+    setColumnFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const clearFilters = () => {
+    setColumnFilters(initialColumnFilters);
+  };
+
+  const exportDetails = () => {
+    try {
+      const rows = sorted.map((t) => ({
+        'Дата': formatDate(t.date),
+        'Журнал': t.sheet,
+        'Источник': t.source,
+        'Филиал': t.branch,
+        'Контрагент': t.counterparty,
+        'Статья': t.article,
+        'Сумма': t.amount,
+        'Направление': t.direction === 'in' ? 'Поступление' : 'Выбытие',
+        'Примечание': t.note,
+        'Месяц начисления': t.accrualMonth,
+        'Документ': t.document,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Детализация');
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `детализация_операций_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export details error', error);
+      alert('Не удалось экспортировать детализацию операций.');
+    }
   };
 
   if (filteredTransactions.length === 0) return null;
@@ -80,9 +178,26 @@ export function TransactionsTable() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
-        Детализация операций ({filteredTransactions.length.toLocaleString('ru-RU')})
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">
+          Детализация операций ({columnFiltered.length.toLocaleString('ru-RU')})
+        </h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={clearFilters}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+          >
+            Сбросить фильтры
+          </button>
+          <button
+            onClick={exportDetails}
+            className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Экспорт детализации
+          </button>
+        </div>
+      </div>
 
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200">
@@ -97,6 +212,17 @@ export function TransactionsTable() {
               <SortHeader label="Сумма" field="amount" />
               <th className="px-3 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide">Примечание</th>
               <th className="px-3 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wide">Мес. начисления</th>
+            </tr>
+            <tr className="bg-slate-100">
+              <th className="px-2 py-2"><input value={columnFilters.date} onChange={(e) => setFilter('date', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.sheet} onChange={(e) => setFilter('sheet', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.source} onChange={(e) => setFilter('source', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.branch} onChange={(e) => setFilter('branch', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.counterparty} onChange={(e) => setFilter('counterparty', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.article} onChange={(e) => setFilter('article', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.amount} onChange={(e) => setFilter('amount', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.note} onChange={(e) => setFilter('note', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
+              <th className="px-2 py-2"><input value={columnFilters.accrualMonth} onChange={(e) => setFilter('accrualMonth', e.target.value)} placeholder="Фильтр" className="w-full rounded border border-slate-300 px-2 py-1 text-xs" /></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -133,7 +259,6 @@ export function TransactionsTable() {
         </table>
       </div>
 
-      {/* Пагинация */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-1">
           <p className="text-xs text-slate-500">

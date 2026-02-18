@@ -126,25 +126,32 @@ function buildSheetProfile(data: unknown[][], headerRowIndex: number): SheetProf
   const uniqueHeaders = headers.map((h, idx) => (headers.indexOf(h) === idx ? h : `${h} (${getColumnLetter(idx)})`));
 
   const valuesByColumn: Record<string, string[]> = {};
+  const uniqueValuesByColumn: Record<string, Set<string>> = {};
   uniqueHeaders.forEach((h) => {
     valuesByColumn[h] = [];
+    uniqueValuesByColumn[h] = new Set<string>();
   });
 
-  for (let r = headerRowIndex + 1; r < data.length; r++) {
+  const MAX_VALUES_PER_COLUMN = 300;
+  const MAX_ROWS_FOR_PROFILE = 5000;
+  const maxRowIndex = Math.min(data.length, headerRowIndex + 1 + MAX_ROWS_FOR_PROFILE);
+
+  for (let r = headerRowIndex + 1; r < maxRowIndex; r++) {
     const row = data[r] || [];
     uniqueHeaders.forEach((header, c) => {
+      const bucket = valuesByColumn[header];
+      if (bucket.length >= MAX_VALUES_PER_COLUMN) return;
+
       const value = String(row[c] ?? '').trim();
       if (!value) return;
-      const bucket = valuesByColumn[header];
-      if (!bucket.includes(value)) {
+
+      const seen = uniqueValuesByColumn[header];
+      if (!seen.has(value)) {
+        seen.add(value);
         bucket.push(value);
       }
     });
   }
-
-  uniqueHeaders.forEach((header) => {
-    valuesByColumn[header] = valuesByColumn[header].slice(0, 300);
-  });
 
   return {
     sheetName: '',
