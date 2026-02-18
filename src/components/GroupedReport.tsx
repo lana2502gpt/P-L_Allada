@@ -50,7 +50,7 @@ export const GroupedReport: React.FC = () => {
       }
 
       const existing = map.get(key);
-      const amount = Math.abs(tx.amount);
+      const amount = tx.amount;
       const inc = tx.direction === 'in' ? amount : 0;
       const exp = tx.direction === 'out' ? amount : 0;
 
@@ -285,8 +285,10 @@ export const GroupedReport: React.FC = () => {
           </thead>
           <tbody>
             {sorted.map((row, i) => {
-              const incPct = maxAmount > 0 ? (row.income / maxAmount) * 100 : 0;
-              const expPct = maxAmount > 0 ? (row.expense / maxAmount) * 100 : 0;
+              const incAbs = Math.abs(row.income);
+              const expAbs = Math.abs(row.expense);
+              const incPct = maxAmount > 0 ? (incAbs / maxAmount) * 100 : 0;
+              const expPct = maxAmount > 0 ? (expAbs / maxAmount) * 100 : 0;
               return (
                 <tr key={i} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-2.5 text-gray-800 font-medium max-w-xs truncate" title={row.label}>
@@ -299,24 +301,24 @@ export const GroupedReport: React.FC = () => {
                   )}
                   <td className="px-4 py-2.5 text-right text-gray-600">{row.count}</td>
                   <td className="px-4 py-2.5 text-right text-green-600 font-medium">
-                    {row.income > 0 ? `+${fmt(row.income)}` : '—'}
+                    {row.income !== 0 ? fmt(row.income) : '—'}
                   </td>
                   <td className="px-4 py-2.5 text-right text-red-600 font-medium">
-                    {row.expense > 0 ? `-${fmt(row.expense)}` : '—'}
+                    {row.expense !== 0 ? fmt(row.expense) : '—'}
                   </td>
                   <td className={`px-4 py-2.5 text-right font-bold ${row.balance >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
                     {fmt(row.balance)}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex h-4 rounded-full overflow-hidden bg-gray-100" style={{ width: '100%' }}>
-                      {row.income > 0 && (
+                      {row.income !== 0 && (
                         <div
                           className="bg-green-400 h-full"
                           style={{ width: `${incPct}%` }}
                           title={`Поступления: ${fmt(row.income)}`}
                         />
                       )}
-                      {row.expense > 0 && (
+                      {row.expense !== 0 && (
                         <div
                           className="bg-red-400 h-full"
                           style={{ width: `${expPct}%` }}
@@ -334,8 +336,8 @@ export const GroupedReport: React.FC = () => {
               <td className="px-4 py-3 text-gray-800">ИТОГО</td>
               {isTwoCol && <td className="px-4 py-3" />}
               <td className="px-4 py-3 text-right text-gray-800">{totals.count}</td>
-              <td className="px-4 py-3 text-right text-green-700">+{fmt(totals.income)}</td>
-              <td className="px-4 py-3 text-right text-red-700">-{fmt(totals.expense)}</td>
+              <td className="px-4 py-3 text-right text-green-700">{fmt(totals.income)}</td>
+              <td className="px-4 py-3 text-right text-red-700">{fmt(totals.expense)}</td>
               <td className={`px-4 py-3 text-right ${totals.balance >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
                 {fmt(totals.balance)}
               </td>
