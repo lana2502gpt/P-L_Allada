@@ -33,7 +33,6 @@ function cleanCounterparty(raw: string): string {
     'M': 'М', 'O': 'О', 'P': 'Р', 'T': 'Т', 'X': 'Х', 'V': 'В',
     'a': 'а', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 'x': 'х', 'v': 'в',
   };
-
   s = Array.from(s).map(ch => engToRus[ch] ?? ch).join('');
 
   const upper = s.toUpperCase();
@@ -80,6 +79,7 @@ function cleanCounterparty(raw: string): string {
   if (words.length <= 3) return words.join(' ');
   return words.slice(0, 3).join(' ');
 }
+
 
 function normalizeCounterpartyForMatch(raw: string): string {
   return String(raw || '')
@@ -139,7 +139,7 @@ function buildTokenSignature(normalized: string): string {
     .map(t => t.trim())
     .filter(Boolean)
     .filter(t => !stopTokens.has(t))
-    .filter(t => t.length >= 3)
+    .filter(t => t.length >= 2)
     .filter(t => !/\d/.test(t))
     .filter(t => /^[a-zа-яё-]+$/i.test(t))
     .sort();
