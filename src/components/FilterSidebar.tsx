@@ -18,11 +18,12 @@ function MultiSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
+  const normalizedSearch = search.trim().toLowerCase();
+
   const filtered = useMemo(() => {
-    if (!search) return options;
-    const lower = search.toLowerCase();
-    return options.filter(o => o.toLowerCase().includes(lower));
-  }, [options, search]);
+    if (!normalizedSearch) return options;
+    return options.filter((o) => o.toLowerCase().includes(normalizedSearch));
+  }, [options, normalizedSearch]);
 
   const toggle = (item: string) => {
     if (selected.includes(item)) {
@@ -37,10 +38,9 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    // Если в поиске введён текст, выбираем только видимые (отфильтрованные) значения.
-    // Это ожидаемое поведение для "Выбрать все" в текущем контексте поиска.
-    const target = search.trim() ? filtered : options;
-    onChange(Array.from(new Set(target)));
+    // Выбираем все элементы из текущего видимого списка.
+    // Когда поиск пустой, filtered совпадает с полным options.
+    onChange(Array.from(new Set(filtered)));
   };
 
   return (
