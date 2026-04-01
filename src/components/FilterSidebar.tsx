@@ -2,6 +2,12 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X, CalendarDays } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
+function getFilteredOptions(options: string[], search: string): string[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) return options;
+  return options.filter((o) => o.toLowerCase().includes(normalizedSearch));
+}
+
 function MultiSelect({
   label,
   options,
@@ -18,11 +24,7 @@ function MultiSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  const filtered = useMemo(() => {
-    if (!search) return options;
-    const lower = search.toLowerCase();
-    return options.filter(o => o.toLowerCase().includes(lower));
-  }, [options, search]);
+  const filtered = useMemo(() => getFilteredOptions(options, search), [options, search]);
 
   const toggle = (item: string) => {
     if (selected.includes(item)) {
@@ -37,10 +39,10 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    // Если в поиске введён текст, выбираем только видимые (отфильтрованные) значения.
-    // Это ожидаемое поведение для "Выбрать все" в текущем контексте поиска.
-    const target = search.trim() ? filtered : options;
-    onChange(Array.from(new Set(target)));
+    // Пересчитываем видимые значения в момент клика,
+    // чтобы исключить любые рассинхронизации состояния поиска.
+    const visible = getFilteredOptions(options, search);
+    onChange(Array.from(new Set(visible)));
   };
 
   return (
