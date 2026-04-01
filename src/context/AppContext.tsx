@@ -244,18 +244,6 @@ function reducer(state: AppState, action: Action): AppState {
 
 // ========== Derived data helpers ==========
 
-function getSelectedSheetNames(sources: DataSource[]): Set<string> {
-  const set = new Set<string>();
-  sources
-    .filter(s => s.status === 'ready')
-    .forEach(s => {
-      s.sheets.forEach(sh => {
-        if (sh.selected) set.add(sh.name);
-      });
-    });
-  return set;
-}
-
 function buildCounterpartyDictionary(sources: DataSource[]): {
   exactMap: Map<string, string>;
   tokenMap: Map<string, string>;
@@ -342,19 +330,24 @@ function resolveCounterpartyName(
 }
 
 function getAllTransactions(sources: DataSource[]): Transaction[] {
-  const selectedSheets = getSelectedSheetNames(sources);
   const dictionary = buildCounterpartyDictionary(sources);
 
   return sources
     .filter(s => s.status === 'ready')
-    .flatMap(s =>
-      s.transactions
+    .flatMap(s => {
+      const selectedSheets = new Set(
+        s.sheets
+          .filter(sh => sh.selected)
+          .map(sh => sh.name),
+      );
+
+      return s.transactions
         .filter(t => selectedSheets.has(t.sheet))
         .map(t => ({
           ...t,
           counterparty: resolveCounterpartyName(t.counterparty, dictionary),
-        })),
-    );
+        }));
+    });
 }
 
 function getAllArticles(sources: DataSource[]): ArticleDDS[] {
