@@ -18,11 +18,12 @@ function MultiSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
+  const normalizedSearch = search.trim().toLowerCase();
+
   const filtered = useMemo(() => {
-    if (!search) return options;
-    const lower = search.toLowerCase();
-    return options.filter(o => o.toLowerCase().includes(lower));
-  }, [options, search]);
+    if (!normalizedSearch) return options;
+    return options.filter((o) => o.toLowerCase().includes(normalizedSearch));
+  }, [options, normalizedSearch]);
 
   const toggle = (item: string) => {
     if (selected.includes(item)) {
@@ -37,7 +38,9 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    onChange(Array.from(new Set(options)));
+    // Выбираем только видимые результаты поиска и не теряем уже выбранные элементы.
+    // Это исключает случай, когда при активном поиске в фильтр попадает полный список.
+    onChange(Array.from(new Set([...selected, ...filtered])));
   };
 
   return (
@@ -189,10 +192,14 @@ export function FilterSidebar() {
     setDateToInput(formatDateInput(filters.dateTo));
   }, [filters.dateTo]);
 
-  const articleNames = useMemo(() =>
-    allArticles.filter(a => a.name).map(a => a.name),
-    [allArticles]
-  );
+  const articleNames = useMemo(() => {
+    const set = new Set<string>();
+    allArticles.forEach((a) => {
+      const name = String(a.name || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [allArticles]);
 
   const hasActiveFilters = filters.articles.length > 0
     || filters.branches.length > 0

@@ -403,7 +403,16 @@ function getUniqueCounterpartiesFromTx(transactions: Transaction[]): string[] {
   return Array.from(set).sort();
 }
 
+function normalizeFilterText(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
 function applyFilters(transactions: Transaction[], filters: Filters): Transaction[] {
+  const articleSet = new Set(filters.articles.map(normalizeFilterText).filter(Boolean));
+  const branchSet = new Set(filters.branches.map(normalizeFilterText).filter(Boolean));
+  const counterpartySet = new Set(filters.counterparties.map(normalizeFilterText).filter(Boolean));
+  const sheetSet = new Set(filters.sheets.map(normalizeFilterText).filter(Boolean));
+
   return transactions.filter(t => {
     if (filters.dateFrom && t.date < filters.dateFrom) return false;
     if (filters.dateTo) {
@@ -411,13 +420,13 @@ function applyFilters(transactions: Transaction[], filters: Filters): Transactio
       endOfDay.setHours(23, 59, 59, 999);
       if (t.date > endOfDay) return false;
     }
-    if (filters.articles.length > 0 && !filters.articles.includes(t.article)) return false;
-    if (filters.branches.length > 0 && !filters.branches.includes(t.branch)) return false;
-    if (filters.counterparties.length > 0) {
-      if (!filters.counterparties.includes(t.counterparty)) return false;
-    }
-    if (filters.sheets.length > 0 && !filters.sheets.includes(t.sheet)) return false;
+
+    if (articleSet.size > 0 && !articleSet.has(normalizeFilterText(t.article))) return false;
+    if (branchSet.size > 0 && !branchSet.has(normalizeFilterText(t.branch))) return false;
+    if (counterpartySet.size > 0 && !counterpartySet.has(normalizeFilterText(t.counterparty))) return false;
+    if (sheetSet.size > 0 && !sheetSet.has(normalizeFilterText(t.sheet))) return false;
     if (filters.direction !== 'all' && t.direction !== filters.direction) return false;
+
     return true;
   });
 }
