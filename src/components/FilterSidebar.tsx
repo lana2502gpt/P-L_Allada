@@ -37,7 +37,10 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    onChange(Array.from(new Set(options)));
+    // Если в поиске введён текст, выбираем только видимые (отфильтрованные) значения.
+    // Это ожидаемое поведение для "Выбрать все" в текущем контексте поиска.
+    const target = search.trim() ? filtered : options;
+    onChange(Array.from(new Set(target)));
   };
 
   return (
