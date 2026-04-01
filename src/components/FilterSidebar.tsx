@@ -2,6 +2,12 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X, CalendarDays } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
+function getFilteredOptions(options: string[], search: string): string[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) return options;
+  return options.filter((o) => o.toLowerCase().includes(normalizedSearch));
+}
+
 function MultiSelect({
   label,
   options,
@@ -18,11 +24,7 @@ function MultiSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  const filtered = useMemo(() => {
-    if (!search) return options;
-    const lower = search.toLowerCase();
-    return options.filter(o => o.toLowerCase().includes(lower));
-  }, [options, search]);
+  const filtered = useMemo(() => getFilteredOptions(options, search), [options, search]);
 
   const toggle = (item: string) => {
     if (selected.includes(item)) {
@@ -37,7 +39,10 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    onChange(Array.from(new Set(options)));
+    // Пересчитываем видимые значения в момент клика,
+    // чтобы исключить любые рассинхронизации состояния поиска.
+    const visible = getFilteredOptions(options, search);
+    onChange(Array.from(new Set(visible)));
   };
 
   return (
@@ -189,10 +194,14 @@ export function FilterSidebar() {
     setDateToInput(formatDateInput(filters.dateTo));
   }, [filters.dateTo]);
 
-  const articleNames = useMemo(() =>
-    allArticles.filter(a => a.name).map(a => a.name),
-    [allArticles]
-  );
+  const articleNames = useMemo(() => {
+    const set = new Set<string>();
+    allArticles.forEach((a) => {
+      const name = String(a.name || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [allArticles]);
 
   const hasActiveFilters = filters.articles.length > 0
     || filters.branches.length > 0

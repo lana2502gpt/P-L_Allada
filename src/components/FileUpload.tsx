@@ -21,6 +21,20 @@ export function FileUpload() {
     loader: () => ReturnType<typeof parseExcelFile>,
     url?: string,
   ) => {
+    const normalizedUrl = (url || '').trim();
+    const duplicateSource = state.sources.find((s) => {
+      if (s.type !== type) return false;
+      if (type === 'google_sheets') {
+        return (s.url || '').trim() === normalizedUrl;
+      }
+      return s.name === name;
+    });
+
+    if (duplicateSource) {
+      alert('Источник уже загружен. Удалите дубликат или добавьте другой файл/ссылку.');
+      return;
+    }
+
     const id = `src_${++sourceIdCounter}_${Date.now()}`;
 
     const source: DataSource = {
@@ -69,7 +83,7 @@ export function FileUpload() {
         },
       });
     }
-  }, [dispatch]);
+  }, [dispatch, state.sources]);
 
   const handleFiles = useCallback((files: FileList | File[]) => {
     Array.from(files).forEach(file => {
@@ -96,7 +110,7 @@ export function FileUpload() {
 
   const removeSource = useCallback((id: string) => {
     dispatch({ type: 'REMOVE_SOURCE', payload: id });
-  }, [dispatch]);
+  }, [dispatch, state.sources]);
 
   const sheetTypeLabel = (type: string) => {
     switch (type) {
@@ -480,7 +494,7 @@ export function FileUpload() {
                   <option key={col} value={col}>{col}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(counterpartyConfig).length}</p>
+              <p className="text-[11px] text-slate-500">В выбранном столбце: {getValuesForConfig(counterpartyConfig).length}</p>
               <button
                 type="button"
                 onClick={() => applyReferenceFromColumn(counterpartyConfig, 'counterparties')}
@@ -524,7 +538,7 @@ export function FileUpload() {
                   <option key={col} value={col}>{col}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-slate-500">Найдено значений: {getValuesForConfig(articleConfig).length}</p>
+              <p className="text-[11px] text-slate-500">В выбранном столбце: {getValuesForConfig(articleConfig).length}</p>
               <button
                 type="button"
                 onClick={() => applyReferenceFromColumn(articleConfig, 'articles')}
