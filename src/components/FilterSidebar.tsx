@@ -189,10 +189,14 @@ export function FilterSidebar() {
     setDateToInput(formatDateInput(filters.dateTo));
   }, [filters.dateTo]);
 
-  const articleNames = useMemo(() =>
-    allArticles.filter(a => a.name).map(a => a.name),
-    [allArticles]
-  );
+  const articleNames = useMemo(() => {
+    const set = new Set<string>();
+    allArticles.forEach((a) => {
+      const name = String(a.name || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [allArticles]);
 
   const hasActiveFilters = filters.articles.length > 0
     || filters.branches.length > 0
