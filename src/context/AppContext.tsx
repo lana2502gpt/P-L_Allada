@@ -152,6 +152,7 @@ function buildTokenSignature(normalized: string): string {
 interface AppState {
   sources: DataSource[];
   filters: Filters;
+  counterpartyArticleOverrides: Record<string, string>;
 }
 
 const initialFilters: Filters = {
@@ -167,6 +168,7 @@ const initialFilters: Filters = {
 const initialState: AppState = {
   sources: [],
   filters: initialFilters,
+  counterpartyArticleOverrides: {},
 };
 
 // ========== Actions ==========
@@ -177,8 +179,14 @@ type Action =
   | { type: 'REMOVE_SOURCE'; payload: string }
   | { type: 'SET_FILTERS'; payload: Partial<Filters> }
   | { type: 'RESET_FILTERS' }
+  | { type: 'SET_COUNTERPARTY_ARTICLE_OVERRIDE'; payload: { counterparty: string; article: string } }
+  | { type: 'REMOVE_COUNTERPARTY_ARTICLE_OVERRIDE'; payload: { counterparty: string } }
   | { type: 'TOGGLE_SHEET_SELECTION'; payload: { sourceId: string; sheetName: string } }
   | { type: 'SET_ALL_SHEETS_SELECTION'; payload: { sourceId: string; selected: boolean } };
+
+function normalizeCounterpartyOverrideKey(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -204,6 +212,29 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'RESET_FILTERS':
       return { ...state, filters: initialFilters };
+
+    case 'SET_COUNTERPARTY_ARTICLE_OVERRIDE': {
+      const key = normalizeCounterpartyOverrideKey(action.payload.counterparty);
+      if (!key || !action.payload.article.trim()) return state;
+      return {
+        ...state,
+        counterpartyArticleOverrides: {
+          ...state.counterpartyArticleOverrides,
+          [key]: action.payload.article,
+        },
+      };
+    }
+
+    case 'REMOVE_COUNTERPARTY_ARTICLE_OVERRIDE': {
+      const key = normalizeCounterpartyOverrideKey(action.payload.counterparty);
+      if (!key || !state.counterpartyArticleOverrides[key]) return state;
+      const next = { ...state.counterpartyArticleOverrides };
+      delete next[key];
+      return {
+        ...state,
+        counterpartyArticleOverrides: next,
+      };
+    }
 
     case 'TOGGLE_SHEET_SELECTION':
       return {
@@ -243,18 +274,6 @@ function reducer(state: AppState, action: Action): AppState {
 }
 
 // ========== Derived data helpers ==========
-
-function getSelectedSheetNames(sources: DataSource[]): Set<string> {
-  const set = new Set<string>();
-  sources
-    .filter(s => s.status === 'ready')
-    .forEach(s => {
-      s.sheets.forEach(sh => {
-        if (sh.selected) set.add(sh.name);
-      });
-    });
-  return set;
-}
 
 function buildCounterpartyDictionary(sources: DataSource[]): {
   exactMap: Map<string, string>;
@@ -337,24 +356,40 @@ function resolveCounterpartyName(
     return cleaned;
   }
 
-  // Если справочник есть, но совпадение не найдено
-  return 'нет в справочнике';
+  // Если справочник есть, но совпадение не найдено,
+  // возвращаем очищенное исходное значение, чтобы не терять контрагента в отчётах.
+  return cleaned;
 }
 
-function getAllTransactions(sources: DataSource[]): Transaction[] {
-  const selectedSheets = getSelectedSheetNames(sources);
+function getAllTransactions(
+  sources: DataSource[],
+  counterpartyArticleOverrides: Record<string, string>,
+): Transaction[] {
   const dictionary = buildCounterpartyDictionary(sources);
 
   return sources
     .filter(s => s.status === 'ready')
-    .flatMap(s =>
-      s.transactions
+    .flatMap(s => {
+      const selectedSheets = new Set(
+        s.sheets
+          .filter(sh => sh.selected)
+          .map(sh => sh.name),
+      );
+
+      return s.transactions
         .filter(t => selectedSheets.has(t.sheet))
-        .map(t => ({
-          ...t,
-          counterparty: resolveCounterpartyName(t.counterparty, dictionary),
-        })),
-    );
+        .map(t => {
+          const resolvedCounterparty = resolveCounterpartyName(t.counterparty, dictionary);
+          const overrideKey = normalizeCounterpartyOverrideKey(resolvedCounterparty);
+          const articleOverride = counterpartyArticleOverrides[overrideKey];
+
+          return {
+            ...t,
+            counterparty: resolvedCounterparty,
+            article: articleOverride || t.article,
+          };
+        });
+    });
 }
 
 function getAllArticles(sources: DataSource[]): ArticleDDS[] {
@@ -403,7 +438,16 @@ function getUniqueCounterpartiesFromTx(transactions: Transaction[]): string[] {
   return Array.from(set).sort();
 }
 
+function normalizeFilterText(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
 function applyFilters(transactions: Transaction[], filters: Filters): Transaction[] {
+  const articleSet = new Set(filters.articles.map(normalizeFilterText).filter(Boolean));
+  const branchSet = new Set(filters.branches.map(normalizeFilterText).filter(Boolean));
+  const counterpartySet = new Set(filters.counterparties.map(normalizeFilterText).filter(Boolean));
+  const sheetSet = new Set(filters.sheets.map(normalizeFilterText).filter(Boolean));
+
   return transactions.filter(t => {
     if (filters.dateFrom && t.date < filters.dateFrom) return false;
     if (filters.dateTo) {
@@ -411,13 +455,13 @@ function applyFilters(transactions: Transaction[], filters: Filters): Transactio
       endOfDay.setHours(23, 59, 59, 999);
       if (t.date > endOfDay) return false;
     }
-    if (filters.articles.length > 0 && !filters.articles.includes(t.article)) return false;
-    if (filters.branches.length > 0 && !filters.branches.includes(t.branch)) return false;
-    if (filters.counterparties.length > 0) {
-      if (!filters.counterparties.includes(t.counterparty)) return false;
-    }
-    if (filters.sheets.length > 0 && !filters.sheets.includes(t.sheet)) return false;
+
+    if (articleSet.size > 0 && !articleSet.has(normalizeFilterText(t.article))) return false;
+    if (branchSet.size > 0 && !branchSet.has(normalizeFilterText(t.branch))) return false;
+    if (counterpartySet.size > 0 && !counterpartySet.has(normalizeFilterText(t.counterparty))) return false;
+    if (sheetSet.size > 0 && !sheetSet.has(normalizeFilterText(t.sheet))) return false;
     if (filters.direction !== 'all' && t.direction !== filters.direction) return false;
+
     return true;
   });
 }
@@ -435,6 +479,7 @@ interface AppContextValue {
   uniqueBranches: string[];
   uniqueSheets: string[];
   uniqueCounterpartiesFromTx: string[];
+  counterpartyArticleOverrides: Record<string, string>;
   cleanCounterparty: (raw: string) => string;
 }
 
@@ -443,7 +488,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const allTransactions = getAllTransactions(state.sources);
+  const allTransactions = getAllTransactions(state.sources, state.counterpartyArticleOverrides);
   const filteredTransactions = applyFilters(allTransactions, state.filters);
   const allArticles = getAllArticles(state.sources);
   const allCounterparties = getAllCounterparties(state.sources);
@@ -462,6 +507,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uniqueBranches,
       uniqueSheets,
       uniqueCounterpartiesFromTx,
+      counterpartyArticleOverrides: state.counterpartyArticleOverrides,
       cleanCounterparty,
     }}>
       {children}

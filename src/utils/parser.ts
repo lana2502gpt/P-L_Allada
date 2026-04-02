@@ -536,7 +536,7 @@ function getVisibleSheetNames(workbook: XLSX.WorkBook): string[] {
     return all;
   }
 
-  const visible = all.filter((name, idx) => {
+  const visible = all.filter((_, idx) => {
     const hidden = sheetMeta[idx]?.Hidden;
     return hidden === undefined || hidden === 0;
   });
