@@ -152,6 +152,7 @@ function buildTokenSignature(normalized: string): string {
 interface AppState {
   sources: DataSource[];
   filters: Filters;
+  counterpartyArticleOverrides: Record<string, string>;
 }
 
 const initialFilters: Filters = {
@@ -167,6 +168,7 @@ const initialFilters: Filters = {
 const initialState: AppState = {
   sources: [],
   filters: initialFilters,
+  counterpartyArticleOverrides: {},
 };
 
 // ========== Actions ==========
@@ -177,8 +179,14 @@ type Action =
   | { type: 'REMOVE_SOURCE'; payload: string }
   | { type: 'SET_FILTERS'; payload: Partial<Filters> }
   | { type: 'RESET_FILTERS' }
+  | { type: 'SET_COUNTERPARTY_ARTICLE_OVERRIDE'; payload: { counterparty: string; article: string } }
+  | { type: 'REMOVE_COUNTERPARTY_ARTICLE_OVERRIDE'; payload: { counterparty: string } }
   | { type: 'TOGGLE_SHEET_SELECTION'; payload: { sourceId: string; sheetName: string } }
   | { type: 'SET_ALL_SHEETS_SELECTION'; payload: { sourceId: string; selected: boolean } };
+
+function normalizeCounterpartyOverrideKey(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -204,6 +212,29 @@ function reducer(state: AppState, action: Action): AppState {
 
     case 'RESET_FILTERS':
       return { ...state, filters: initialFilters };
+
+    case 'SET_COUNTERPARTY_ARTICLE_OVERRIDE': {
+      const key = normalizeCounterpartyOverrideKey(action.payload.counterparty);
+      if (!key || !action.payload.article.trim()) return state;
+      return {
+        ...state,
+        counterpartyArticleOverrides: {
+          ...state.counterpartyArticleOverrides,
+          [key]: action.payload.article,
+        },
+      };
+    }
+
+    case 'REMOVE_COUNTERPARTY_ARTICLE_OVERRIDE': {
+      const key = normalizeCounterpartyOverrideKey(action.payload.counterparty);
+      if (!key || !state.counterpartyArticleOverrides[key]) return state;
+      const next = { ...state.counterpartyArticleOverrides };
+      delete next[key];
+      return {
+        ...state,
+        counterpartyArticleOverrides: next,
+      };
+    }
 
     case 'TOGGLE_SHEET_SELECTION':
       return {
@@ -325,11 +356,15 @@ function resolveCounterpartyName(
     return cleaned;
   }
 
-  // Если справочник есть, но совпадение не найдено
-  return 'нет в справочнике';
+  // Если справочник есть, но совпадение не найдено,
+  // возвращаем очищенное исходное значение, чтобы не терять контрагента в отчётах.
+  return cleaned;
 }
 
-function getAllTransactions(sources: DataSource[]): Transaction[] {
+function getAllTransactions(
+  sources: DataSource[],
+  counterpartyArticleOverrides: Record<string, string>,
+): Transaction[] {
   const dictionary = buildCounterpartyDictionary(sources);
 
   return sources
@@ -343,10 +378,17 @@ function getAllTransactions(sources: DataSource[]): Transaction[] {
 
       return s.transactions
         .filter(t => selectedSheets.has(t.sheet))
-        .map(t => ({
-          ...t,
-          counterparty: resolveCounterpartyName(t.counterparty, dictionary),
-        }));
+        .map(t => {
+          const resolvedCounterparty = resolveCounterpartyName(t.counterparty, dictionary);
+          const overrideKey = normalizeCounterpartyOverrideKey(resolvedCounterparty);
+          const articleOverride = counterpartyArticleOverrides[overrideKey];
+
+          return {
+            ...t,
+            counterparty: resolvedCounterparty,
+            article: articleOverride || t.article,
+          };
+        });
     });
 }
 
@@ -437,6 +479,7 @@ interface AppContextValue {
   uniqueBranches: string[];
   uniqueSheets: string[];
   uniqueCounterpartiesFromTx: string[];
+  counterpartyArticleOverrides: Record<string, string>;
   cleanCounterparty: (raw: string) => string;
 }
 
@@ -445,7 +488,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  const allTransactions = getAllTransactions(state.sources);
+  const allTransactions = getAllTransactions(state.sources, state.counterpartyArticleOverrides);
   const filteredTransactions = applyFilters(allTransactions, state.filters);
   const allArticles = getAllArticles(state.sources);
   const allCounterparties = getAllCounterparties(state.sources);
@@ -464,6 +507,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       uniqueBranches,
       uniqueSheets,
       uniqueCounterpartiesFromTx,
+      counterpartyArticleOverrides: state.counterpartyArticleOverrides,
       cleanCounterparty,
     }}>
       {children}

@@ -27,7 +27,9 @@ export function FileUpload() {
       if (type === 'google_sheets') {
         return (s.url || '').trim() === normalizedUrl;
       }
-      return s.name === name;
+      // Для файлов одинаковое имя не всегда означает дубликат
+      // (например, выгрузки из разных банков с одинаковым названием).
+      return false;
     });
 
     if (duplicateSource) {
