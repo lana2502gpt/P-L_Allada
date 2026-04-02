@@ -2,6 +2,12 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { Filter, RotateCcw, ChevronDown, ChevronUp, Search, X, CalendarDays } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
+function getFilteredOptions(options: string[], search: string): string[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  if (!normalizedSearch) return options;
+  return options.filter((o) => o.toLowerCase().includes(normalizedSearch));
+}
+
 function MultiSelect({
   label,
   options,
@@ -18,11 +24,7 @@ function MultiSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  const filtered = useMemo(() => {
-    if (!search) return options;
-    const lower = search.toLowerCase();
-    return options.filter(o => o.toLowerCase().includes(lower));
-  }, [options, search]);
+  const filtered = useMemo(() => getFilteredOptions(options, search), [options, search]);
 
   const toggle = (item: string) => {
     if (selected.includes(item)) {
@@ -37,7 +39,10 @@ function MultiSelect({
   };
 
   const selectAll = () => {
-    onChange(Array.from(new Set(options)));
+    // Пересчитываем видимые значения в момент клика,
+    // чтобы исключить любые рассинхронизации состояния поиска.
+    const visible = getFilteredOptions(options, search);
+    onChange(Array.from(new Set(visible)));
   };
 
   return (
@@ -169,11 +174,14 @@ export function FilterSidebar() {
     uniqueBranches,
     uniqueSheets,
     uniqueCounterpartiesFromTx,
+    counterpartyArticleOverrides,
     allTransactions,
   } = useAppContext();
 
   const { filters } = state;
   const hasData = allTransactions.length > 0;
+  const [overrideCounterparty, setOverrideCounterparty] = useState('');
+  const [overrideArticle, setOverrideArticle] = useState('');
 
   const [dateFromInput, setDateFromInput] = useState(formatDateInput(filters.dateFrom));
   const [dateToInput, setDateToInput] = useState(formatDateInput(filters.dateTo));
@@ -189,10 +197,14 @@ export function FilterSidebar() {
     setDateToInput(formatDateInput(filters.dateTo));
   }, [filters.dateTo]);
 
-  const articleNames = useMemo(() =>
-    allArticles.filter(a => a.name).map(a => a.name),
-    [allArticles]
-  );
+  const articleNames = useMemo(() => {
+    const set = new Set<string>();
+    allArticles.forEach((a) => {
+      const name = String(a.name || '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [allArticles]);
 
   const hasActiveFilters = filters.articles.length > 0
     || filters.branches.length > 0
@@ -399,6 +411,62 @@ export function FilterSidebar() {
           onChange={(counterparties) => dispatch({ type: 'SET_FILTERS', payload: { counterparties } })}
           placeholder="Поиск контрагентов..."
         />
+      )}
+
+      {/* Назначение статьи по контрагенту */}
+      {uniqueCounterpartiesFromTx.length > 0 && articleNames.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <label className="text-xs font-medium text-slate-600">Изменить статью у контрагента</label>
+          <select
+            value={overrideCounterparty}
+            onChange={(e) => setOverrideCounterparty(e.target.value)}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+          >
+            <option value="">Выберите контрагента</option>
+            {uniqueCounterpartiesFromTx.map((cp) => (
+              <option key={cp} value={cp}>{cp}</option>
+            ))}
+          </select>
+          <select
+            value={overrideArticle}
+            onChange={(e) => setOverrideArticle(e.target.value)}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs focus:border-blue-500 focus:outline-none"
+          >
+            <option value="">Выберите статью</option>
+            {articleNames.map((article) => (
+              <option key={article} value={article}>{article}</option>
+            ))}
+          </select>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!overrideCounterparty || !overrideArticle}
+              onClick={() => {
+                dispatch({
+                  type: 'SET_COUNTERPARTY_ARTICLE_OVERRIDE',
+                  payload: { counterparty: overrideCounterparty, article: overrideArticle },
+                });
+              }}
+              className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Применить
+            </button>
+            <button
+              type="button"
+              disabled={!overrideCounterparty || !counterpartyArticleOverrides[overrideCounterparty.trim().toLowerCase()]}
+              onClick={() => {
+                dispatch({
+                  type: 'REMOVE_COUNTERPARTY_ARTICLE_OVERRIDE',
+                  payload: { counterparty: overrideCounterparty },
+                });
+              }}
+              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Убрать
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Журналы */}
